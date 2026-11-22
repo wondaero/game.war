@@ -1,0 +1,20 @@
+{
+  "name": "game-war",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p packages/engine && tsc -p packages/ai && tsc -p packages/core && tsc -p apps/mobile",
+    "dev": "npm -w @war/mobile run dev",
+    "build": "npm -w @war/mobile run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}
