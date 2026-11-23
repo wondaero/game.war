@@ -4,3 +4,8 @@ android
 ios
 .DS_Store
 *.log
+.env
+.env.*
+!.env.example
+supabase/.temp
+supabase/functions/_shared/

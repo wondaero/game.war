@@ -242,7 +242,15 @@ function Compare({ before, after }: { before: UnitInstance; after: UnitInstance 
 
 // ───────────── 덱 ─────────────
 
-export function DeckScreen({ version, onStart }: { version: number; onStart: (deck: UnitInstance[]) => void }) {
+export function DeckScreen({
+  version,
+  onStart,
+  actionLabel = '대전 시작 (vs AI)',
+}: {
+  version: number
+  onStart: (deck: UnitInstance[]) => void
+  actionLabel?: string
+}) {
   const units = useUnits(version)
   const [picked, setPicked] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -283,7 +291,7 @@ export function DeckScreen({ version, onStart }: { version: number; onStart: (de
       <ErrorLine error={error} />
       <div className="footer sticky">
         <button className="primary" disabled={picked.length !== need} onClick={start}>
-          대전 시작 (vs AI)
+          {actionLabel}
         </button>
       </div>
     </div>

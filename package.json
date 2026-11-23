@@ -9,9 +9,12 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -p packages/engine && tsc -p packages/ai && tsc -p packages/core && tsc -p apps/mobile",
+    "typecheck": "tsc -p packages/engine && tsc -p packages/ai && tsc -p packages/core && tsc -p packages/v2 && tsc -p apps/mobile",
     "dev": "npm -w @war/mobile run dev",
-    "build": "npm -w @war/mobile run build"
+    "build": "npm -w @war/mobile run build",
+    "functions:sync": "node scripts/sync-functions.mjs",
+    "functions:deploy": "node scripts/sync-functions.mjs && supabase functions deploy game --use-api --no-verify-jwt",
+    "db:push": "supabase db push"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

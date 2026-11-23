@@ -193,3 +193,63 @@ h3 { margin: 8px 0 0; font-size: 14px; }
 .cell.mark-dangerSoon { box-shadow: inset 0 0 0 2px rgba(255, 152, 0, 0.6); }
 .danger-notice { font-size: 12px; color: #ffab91; background: rgba(244, 67, 54, 0.12); border-radius: 6px; padding: 6px 8px; }
 .float-zone { color: #ff8a65; }
+
+/* ── 초기 화면 ── */
+.title-screen { gap: 48px; }
+.title-logo { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.title-logo h1 { font-size: 34px; letter-spacing: 1px; }
+.title-grid { display: grid; grid-template-columns: repeat(3, 22px); gap: 4px; margin-bottom: 8px; }
+.title-grid span { width: 22px; height: 22px; border-radius: 4px; background: var(--panel); border: 1px solid var(--line); }
+.title-grid span.hot { background: var(--me); border-color: var(--me); }
+.title-buttons { display: flex; flex-direction: column; gap: 10px; width: min(280px, 80vw); }
+button.big { padding: 16px; font-size: 16px; }
+button.ghost { background: none; border: 0; padding: 6px 0; color: var(--muted); }
+
+/* ── 로비 ── */
+.lobby-top { display: flex; align-items: center; gap: 10px; }
+.lobby-top .nick { font-weight: 700; flex: 1; text-align: center; }
+.row.between { justify-content: space-between; align-items: center; }
+.row.between > * { flex: 0 0 auto; }
+.room-row { display: flex; justify-content: space-between; align-items: center; text-align: left; gap: 10px; }
+.room-row.playing { opacity: 0.55; }
+.room-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.room-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room-side { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; }
+.badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--line); }
+.badge.waiting { background: rgba(76, 175, 80, 0.25); color: #9ee6a1; }
+.badge.playing { background: rgba(239, 83, 80, 0.2); color: #ff9e9b; }
+
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field > span { color: var(--muted); font-size: 12px; }
+.field.check { flex-direction: row; align-items: center; gap: 8px; }
+.field.check > span { color: var(--text); font-size: 14px; }
+input:not([type]), input[type='text'] {
+  font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px 12px; user-select: text;
+}
+input:focus { outline: 2px solid var(--me); }
+
+/* ── 대기실 ── */
+.seats { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.seat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.seat.me { border-color: var(--me); }
+.seat.enemy { border-color: var(--enemy); }
+.seat.empty { border-style: dashed; }
+.vs { text-align: center; color: var(--muted); font-weight: 700; }
+.deck-chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.deck-chips .tag { background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; }
+
+/* ── 내 정보 · 상점 ── */
+.profile-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.nick-big { font-size: 18px; }
+.record { display: flex; justify-content: space-between; color: var(--muted); font-size: 13px; }
+.segmented { display: flex; gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.segmented button { flex: 1; border: 0; border-radius: 0; background: none; color: var(--muted); }
+.segmented button.on { background: var(--panel); color: var(--text); font-weight: 700; outline: none; }
+.shop-item { display: flex; justify-content: space-between; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 14px; font-size: 13px; max-width: 90vw; z-index: 10;
+}
