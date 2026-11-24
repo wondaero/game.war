@@ -1,4 +1,4 @@
-import type { UnitInstance } from '@war/engine'
+import type { UnitInstance } from '@war/v2'
 import { ensureSession, errorText, supabase } from './supabase.ts'
 
 /** 서버 방 (rooms 테이블 한 줄) */

@@ -1,4 +1,4 @@
-import type { RngState, UnitInstance } from '@war/engine'
+import type { RngState, UnitInstance } from '@war/v2'
 import {
   InsufficientFundsError,
   NotFoundError,

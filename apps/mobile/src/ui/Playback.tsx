@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { cloneUnits, type GameState, type TurnLog, type UnitId, type UnitState } from '@war/engine'
+import { cloneUnits, type GameEvent, type GameState, type TurnLog, type UnitId, type UnitState } from '@war/v2'
 import { addDangerMarks, addMark, Board, type CellMark, type FloatLabel } from './Board.tsx'
 import { eventLines } from './format.ts'
 
@@ -14,66 +14,97 @@ interface Frame {
 
 const FRAME_MS = 750
 
-/** 스텝마다 이동 → 공격 → 결과 3프레임으로 재생 (엔진 처리 순서 그대로) */
-function buildFrames(before: GameState, log: TurnLog): Frame[] {
+/** 체력 변화·사망을 판에 반영 (재생용) */
+function applyHp(units: Record<UnitId, UnitState>, events: readonly GameEvent[]) {
+  for (const e of events) {
+    if (e.type === 'attack') for (const h of e.hits) units[h.target]!.hp -= h.damage
+    if (e.type === 'reflect') units[e.to]!.hp -= e.damage
+    if (e.type === 'heal') units[e.unit]!.hp += e.amount
+    if (e.type === 'poisonTick' || e.type === 'zoneDamage') units[e.unit]!.hp -= e.damage
+    if (e.type === 'death') units[e.unit]!.alive = false
+  }
+}
+
+/** 행동마다 이동 → 액션 → 결과 3프레임 (엔진 처리 순서 그대로) */
+function buildFrames(before: GameState, after: GameState, log: TurnLog): Frame[] {
   const frames: Frame[] = []
   let prev = before.units
-  for (const s of log.steps) {
+  log.steps.forEach((events, i) => {
+    const step = i + 1
+    const lines = events.flatMap((e) => eventLines(before, e))
     const moved = cloneUnits(prev)
-    for (const e of s.events) if (e.type === 'move') moved[e.unit]!.pos = { ...e.to }
-    const lines = s.events.flatMap((e) => eventLines(before, e))
-    frames.push({ step: s.step, label: '이동', units: moved, marks: new Map(), floats: new Map(), lines })
+    const moveMarks = new Map<string, CellMark[]>()
+    for (const e of events) {
+      if (e.type === 'move') {
+        moved[e.unit]!.pos = { ...e.to }
+        addMark(moveMarks, e.from, 'origin')
+        addMark(moveMarks, e.to, 'flash')
+      }
+      // 이동 시 자가 회복은 이동 프레임에 반영
+      if (e.type === 'heal' && e.source === 'moveRegen') moved[e.unit]!.hp += e.amount
+    }
+    frames.push({ step, label: '이동', units: moved, marks: moveMarks, floats: new Map(), lines })
 
     const marks = new Map<string, CellMark[]>()
     const floats = new Map<UnitId, FloatLabel[]>()
     const float = (id: UnitId, f: FloatLabel) => floats.set(id, [...(floats.get(id) ?? []), f])
-    for (const e of s.events) {
-      if (e.type !== 'attack') continue
-      for (const c of e.path) addMark(marks, c, 'path')
-      for (const c of e.impactCells) addMark(marks, c, 'impact')
-      for (const h of e.hits) {
-        if (h.absorbed) float(h.target, { text: `🛡${h.absorbed}`, kind: 'shield' })
-        if (h.hpDamage) float(h.target, { text: `-${h.hpDamage}`, kind: 'damage' })
-        if (h.reflect) {
-          float(h.target, { text: '반사', kind: 'reflected' })
-          if (h.reflect.absorbed) float(h.attacker, { text: `🛡${h.reflect.absorbed}`, kind: 'shield' })
-          if (h.reflect.hpDamage) float(h.attacker, { text: `-${h.reflect.hpDamage}`, kind: 'damage' })
-        }
+    for (const e of events) {
+      if (e.type === 'attack') {
+        for (const c of e.cells) addMark(marks, c, 'impact')
+        for (const h of e.hits) float(h.target, { text: `-${h.damage}`, kind: 'damage' })
       }
+      if (e.type === 'reflect') float(e.to, { text: `↩-${e.damage}`, kind: 'reflected' })
+      if (e.type === 'heal' && e.source !== 'moveRegen') float(e.unit, { text: `+${e.amount}`, kind: 'heal' })
+      if (e.type === 'buff') for (const t of e.targets) float(t, { text: '⬆', kind: 'status' })
+      if (e.type === 'status') float(e.unit, { text: e.status === 'nullified' ? '⛔' : e.status === 'slowed' ? '🐌' : '☠', kind: 'status' })
     }
-    for (const e of s.events) {
-      if (e.type === 'heal') float(e.unit, { text: `+${e.amount}`, kind: 'heal' })
-    }
-    frames.push({ step: s.step, label: '공격', units: moved, marks, floats, lines })
-    frames.push({ step: s.step, label: '결과', units: s.unitsAfter, marks: new Map(), floats: new Map(), lines })
-    prev = s.unitsAfter
-  }
-  // 턴 끝 ⑧ 자체 회복 ⑨ 위험지대
-  // 턴 끝 이벤트(회복·위험지대·사망·승패)가 있으면 별도 프레임 하나로 표시
-  const heals = log.endEvents
-  if (heals.length) {
+    frames.push({ step, label: '액션', units: moved, marks, floats, lines })
+
+    const result = cloneUnits(moved)
+    applyHp(
+      result,
+      events.filter((e) => !(e.type === 'heal' && e.source === 'moveRegen')),
+    )
+    frames.push({ step, label: '결과', units: result, marks: new Map(), floats: new Map(), lines })
+    prev = result
+  })
+
+  if (log.endEvents.length) {
     const floats = new Map<UnitId, FloatLabel[]>()
     const float = (id: UnitId, f: FloatLabel) => floats.set(id, [...(floats.get(id) ?? []), f])
-    for (const e of heals) {
-      if (e.type === 'heal') float(e.unit, { text: `+${e.amount}`, kind: 'heal' })
-      if (e.type === 'zoneDamage') float(e.unit, { text: `⚠-${e.amount}`, kind: 'zone' })
+    for (const e of log.endEvents) {
+      if (e.type === 'poisonTick') float(e.unit, { text: `☠-${e.damage}`, kind: 'damage' })
+      if (e.type === 'zoneDamage') float(e.unit, { text: `⚠-${e.damage}`, kind: 'zone' })
     }
     const marks = new Map<string, CellMark[]>()
-    addDangerMarks(marks, before, log.turn)
+    addDangerMarks(marks, before.config, log.turn)
     frames.push({
       step: log.steps.length,
       label: '턴 끝',
-      units: log.unitsAfter,
+      units: after.units,
       marks,
       floats,
       lines: log.endEvents.flatMap((e) => eventLines(before, e)),
     })
+  } else if (frames.length) {
+    // 마지막 화면은 실제 결과 상태로 (버프 만료 등 반영)
+    frames[frames.length - 1] = { ...frames[frames.length - 1]!, units: after.units }
   }
   return frames
 }
 
-export function Playback({ before, log, onDone }: { before: GameState; log: TurnLog; onDone: () => void }) {
-  const frames = useMemo(() => buildFrames(before, log), [before, log])
+export function Playback({
+  before,
+  after,
+  log,
+  onDone,
+}: {
+  before: GameState
+  after: GameState
+  log: TurnLog
+  onDone: () => void
+}) {
+  const frames = useMemo(() => buildFrames(before, after, log), [before, after, log])
   const [i, setI] = useState(0)
   const last = i >= frames.length - 1
 
@@ -84,17 +115,20 @@ export function Playback({ before, log, onDone }: { before: GameState; log: Turn
   }, [i, last])
 
   const f = frames[Math.min(i, frames.length - 1)]
-  if (!f) return null
+  if (!f) {
+    onDone()
+    return null
+  }
 
   return (
     <div className="screen">
       <div className="topbar">
         <span>턴 {log.turn} 결과</span>
         <span>
-          스텝 {f.step}/{before.config.actionsPerTurn} · {f.label}
+          행동 {f.step}/{before.config.actionsPerTurn} · {f.label}
         </span>
       </div>
-      <Board state={before} units={f.units} marks={f.marks} floats={f.floats} />
+      <Board cfg={before.config} units={f.units} turn={log.turn} marks={f.marks} floats={f.floats} />
       <div className="log">
         {f.lines.map((l, k) => (
           <div key={k}>{l}</div>

@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react'
-import type { UnitInstance } from '@war/engine'
+import type { UnitInstance } from '@war/v2'
 import type { Wallet } from '@war/core'
-import { gachaCtx, service } from '../services.ts'
+import { service, V2_CFG } from '../services.ts'
+import { imageOf } from '../ui/format.ts'
 import {
   DeckScreen,
   DevScreen,
   GachaScreen,
   InventoryScreen,
   RatesScreen,
-  RerollScreen,
   UnitDetail,
   WalletBar,
 } from '../ui/screens.tsx'
@@ -70,7 +70,7 @@ const TABS: [LobbyTab, string][] = [
   ['shop', '상점'],
 ]
 
-type Overlay = { kind: 'unit'; id: string } | { kind: 'reroll'; id: string } | null
+type Overlay = { kind: 'unit'; id: string } | null
 
 interface LobbyProps {
   wallet: Wallet | null
@@ -92,9 +92,7 @@ export function LobbyScreen(p: LobbyProps) {
   const open = (id: string) => setOverlay({ kind: 'unit', id })
   let body
   if (overlay?.kind === 'unit')
-    body = <UnitDetail id={overlay.id} onBack={() => setOverlay(null)} onReroll={() => setOverlay({ kind: 'reroll', id: overlay.id })} />
-  else if (overlay?.kind === 'reroll')
-    body = <RerollScreen id={overlay.id} onBack={() => setOverlay({ kind: 'unit', id: overlay.id })} onChanged={p.onChanged} />
+    body = <UnitDetail id={overlay.id} onBack={() => setOverlay(null)} />
   else if (p.tab === 'rooms')
     body = p.online ? (
       <OnlineRoomList onJoin={p.onJoin} onCreate={() => p.onTab('create')} />
@@ -346,7 +344,7 @@ export function WaitingRoom({
 }) {
   const [deck, setDeck] = useState<UnitInstance[] | null>(null)
   const [opponent, setOpponent] = useState<string | null>(room.mine ? null : room.host)
-  const need = gachaCtx.config.cardsPerSide
+  const need = V2_CFG.cardsPerSide
   useEffect(() => {
     void Promise.all([service.getDeck(), service.listUnits()]).then(([ids, units]) => {
       const byId = new Map(units.map((u) => [u.id, u]))
@@ -377,7 +375,7 @@ export function WaitingRoom({
             <div className="deck-chips">
               {deck.map((u) => (
                 <span key={u.id} className="tag">
-                  {gachaCtx.catalog[u.champId]?.name ?? u.champId}
+                  {imageOf(u.image).emoji} {imageOf(u.image).name}{u.ability ? ' ✦' : ''}
                 </span>
               ))}
             </div>

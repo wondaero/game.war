@@ -1,25 +1,31 @@
-import { CURRENCIES, type RngState, type UnitInstance } from '@war/engine'
+import { CURRENCIES, type RngState, type UnitInstance } from '@war/v2'
 import type { Wallet } from './repositories.ts'
 
 /**
  * 저장 데이터 (스키마 버전 포함).
  * 버전이 바뀌면 MIGRATIONS[n] 이 n → n+1 로 변환한다. 순서대로 적용.
  */
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
-export interface SaveDataV1 {
-  schemaVersion: 1
+export interface SaveDataV2 {
+  schemaVersion: 2
   inventory: UnitInstance[]
   wallet: Wallet
   deck: string[]
   gachaRng: RngState
 }
-export type SaveData = SaveDataV1
+export type SaveData = SaveDataV2
 
 export type Migration = (old: { schemaVersion: number } & Record<string, unknown>) => { schemaVersion: number } & Record<string, unknown>
 
-/** n → n+1. 예) 2: (v2) => ({ ...v2, schemaVersion: 3, newField: 기본값 }) */
-export const MIGRATIONS: Readonly<Record<number, Migration>> = {}
+/** n → n+1 */
+export const MIGRATIONS: Readonly<Record<number, Migration>> = {
+  // v1(예전 챔피언 규칙) → v2(캐릭터 1종 + 특수능력): 예전 유닛은 새 규칙과 호환되지 않아 보관함·덱을 비운다. 보석은 유지
+  1: (old) => {
+    const w = (old.wallet ?? {}) as Record<string, number>
+    return { schemaVersion: 2, inventory: [], deck: [], wallet: { gem: w.gem ?? 0 }, gachaRng: old.gachaRng }
+  },
+}
 
 export class SaveVersionError extends Error {
   constructor(found: number, supported: number) {
@@ -30,7 +36,7 @@ export class SaveVersionError extends Error {
 
 export function emptySave(seed: number): SaveData {
   const wallet = Object.fromEntries(CURRENCIES.map((c) => [c, 0])) as Wallet
-  return { schemaVersion: 1, inventory: [], wallet, deck: [], gachaRng: { s: seed >>> 0 } }
+  return { schemaVersion: 2, inventory: [], wallet, deck: [], gachaRng: { s: seed >>> 0 } }
 }
 
 /** 저장 원문 → 최신 스키마. 더 새 버전이면 덮어쓰지 않도록 오류 */

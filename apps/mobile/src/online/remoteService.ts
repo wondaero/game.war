@@ -1,24 +1,16 @@
-import {
-  describeTable,
-  pullCost,
-  rerollCost,
-  type Cost,
-  type GachaContext,
-  type RerollLocks,
-  type UnitInstance,
-} from '@war/engine'
+import { describeRates, pullCost, type AbilityKind, type Cost, type UnitInstance, type V2Config } from '@war/v2'
 import type { GameService, Wallet } from '@war/core'
 import { ensureSession, supabase } from './supabase.ts'
 
 /**
  * 서버 함수(game)를 부르는 GameService. 화면은 LocalGameService 와 똑같이 쓴다.
- * 뽑기·리롤·재화·보유 유닛·덱은 전부 서버에 있다. 비용·확률표 계산(표시용)만 앱에서.
+ * 뽑기·재화·보유 유닛·덱은 전부 서버에 있다. 비용·확률 설명(표시용)만 앱에서.
  */
 export class RemoteGameService implements GameService {
   /** 서버 응답으로 갱신 (개발 단계는 비용 차감 없음) */
   chargesResources = false
 
-  constructor(private readonly ctx: GachaContext) {}
+  constructor(private readonly cfg: V2Config) {}
 
   private async call<T>(action: string, args: Record<string, unknown> = {}): Promise<T> {
     if (!supabase) throw new Error('온라인 설정이 없습니다')
@@ -50,17 +42,10 @@ export class RemoteGameService implements GameService {
   }
 
   pullCost(count: 1 | 10): Cost {
-    return pullCost(this.ctx, count)
+    return pullCost(count)
   }
   pull(count: 1 | 10) {
     return this.call<{ units: UnitInstance[]; cost: Cost; wallet: Wallet }>('pull', { count })
-  }
-
-  rerollCost(locks: RerollLocks): Cost {
-    return rerollCost(this.ctx, locks)
-  }
-  reroll(unitId: string, locks: RerollLocks) {
-    return this.call<{ before: UnitInstance; after: UnitInstance; cost: Cost; wallet: Wallet }>('reroll', { unitId, locks })
   }
 
   async getDeck() {
@@ -71,13 +56,13 @@ export class RemoteGameService implements GameService {
   }
 
   describeRates() {
-    return describeTable(this.ctx)
+    return describeRates(this.cfg)
   }
 
   readonly dev = {
     addResources: (delta: Partial<Wallet>) => this.call<Wallet>('dev.addResources', { delta }),
     resetInventory: () => this.call<void>('dev.resetInventory'),
-    grantChamp: (champId: string) => this.call<UnitInstance>('dev.grantChamp', { champId }),
+    grantUnit: (ability: AbilityKind | null) => this.call<UnitInstance>('dev.grantUnit', { ability }),
   }
 }
 

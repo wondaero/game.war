@@ -1,6 +1,6 @@
 import { ABILITIES, abilityValue } from './abilities.ts'
 import { aliveOf, effMove, effRange, inZone, manhattan, opponent, posEq, reachable } from './board.ts'
-import type { Action, GameState, Side, TurnPlan, UnitId, UnitState } from './types.ts'
+import type { Action, GameState, Pos, Side, TurnPlan, UnitId, UnitState } from './types.ts'
 
 export type Validation = { ok: true } | { ok: false; errors: string[] }
 const validation = (errors: string[]): Validation => (errors.length ? { ok: false, errors } : { ok: true })
@@ -22,9 +22,19 @@ export function cloneUnits(units: Record<UnitId, UnitState>): Record<UnitId, Uni
   return out
 }
 
+/** 유닛 하나가 이번 턴에 할 수 있는 행동 수 (살아 있는 내 유닛 수로 정해짐) */
+export function actionsPerUnit(state: GameState, side: Side): number {
+  return state.config.actionsPerUnitByAlive[aliveOf(state.units, side).length] ?? 1
+}
+
+/** 유닛 하나가 이번 턴에 할 수 있는 액션(공격·행동형 능력) 수 */
+export function actsPerUnit(state: GameState, side: Side): number {
+  return state.config.actsPerUnitByAlive[aliveOf(state.units, side).length] ?? 1
+}
+
+/** 같은 유닛이 여러 번 행동할 수 있는지 */
 export function canRepeat(state: GameState, side: Side): boolean {
-  const n = state.config.multiActionWhenCardsAtMost
-  return n > 0 && aliveOf(state.units, side).length <= n
+  return actionsPerUnit(state, side) > 1
 }
 
 /** 턴 시작 시점에 이동할 수 있는 유닛이 하나라도 있는지 (최소 이동 규칙 면제 판단) */
@@ -103,15 +113,25 @@ export function validatePlan(state: GameState, side: Side, plan: TurnPlan): Vali
   if (plan.length !== cfg.actionsPerTurn) errors.push(`plan must have ${cfg.actionsPerTurn} actions`)
 
   const units = cloneUnits(state.units)
-  const repeatOk = canRepeat(state, side)
-  const used = new Set<UnitId>()
+  const cap = actionsPerUnit(state, side)
+  const actCap = actsPerUnit(state, side)
+  const used = new Map<UnitId, number>()
+  const unitActs = new Map<UnitId, number>()
   let moves = 0
+  let acts = 0
   plan.forEach((a, i) => {
     if (a.type === 'wait') return
-    if (used.has(a.unit) && !repeatOk) return void errors.push(`action ${i}: unit already acted`)
+    if ((used.get(a.unit) ?? 0) >= cap) return void errors.push(`action ${i}: unit already acted`)
+    const isAct = a.type === 'attack' || a.type === 'skill'
+    if (isAct && acts >= cfg.maxActsPerTurn) return void errors.push(`action ${i}: too many acts`)
+    if (isAct && (unitActs.get(a.unit) ?? 0) >= actCap) return void errors.push(`action ${i}: unit already acted`)
     const err = actionError(state, units, side, a)
     if (err) return void errors.push(`action ${i}: ${err}`)
-    used.add(a.unit)
+    used.set(a.unit, (used.get(a.unit) ?? 0) + 1)
+    if (isAct) {
+      acts++
+      unitActs.set(a.unit, (unitActs.get(a.unit) ?? 0) + 1)
+    }
     const u = units[a.unit]!
     if (a.type === 'move') {
       u.pos = { ...a.to }
@@ -132,4 +152,83 @@ function applySelfBuffForPlanning(state: GameState, u: UnitState) {
   if (ab.kind === 'moveUp' || ab.kind === 'allUp')
     u.buffs.push({ stat: 'move', amount: v, untilTurn: state.turn + state.config.buffTurns - 1 })
   if (ABILITIES[ab.kind].buff) u.readyTurn = state.turn + state.config.buffCooldownTurns
+}
+
+// ───────────── 화면·대전 진행용 ─────────────
+
+/** 모자란 칸은 대기로 채움 (넘치면 자름) */
+export function padPlan(plan: readonly Action[], n: number): Action[] {
+  const out = plan.slice(0, n)
+  while (out.length < n) out.push({ type: 'wait' })
+  return out
+}
+
+/** 안전장치: 처음으로 이동할 수 있는 유닛을 첫 이동 가능 칸으로 + 나머지 대기 */
+export function fallbackPlan(state: GameState, side: Side): TurnPlan {
+  const out: Action[] = []
+  for (const u of aliveOf(state.units, side)) {
+    const r = reachable(state.config, state.units, u, effMove(u, state.turn))
+    if (r.length) {
+      out.push({ type: 'move', unit: u.id, to: r[0]! })
+      break
+    }
+  }
+  return padPlan(out, state.config.actionsPerTurn)
+}
+
+/**
+ * 제출된 계획을 규칙에 맞게 정리 (앱·상대 기기·서버가 같은 결과를 내도록 결정적).
+ * 1) 그대로 맞으면 그대로
+ * 2) 이동이 하나도 없어서 틀린 거면, 빈 칸(대기) 하나를 가능한 첫 이동으로 바꿔 봄 (시간 초과 대비)
+ * 3) 그래도 안 되면 안전장치 계획
+ */
+export function sanitizePlan(state: GameState, side: Side, raw: unknown): TurnPlan {
+  const n = state.config.actionsPerTurn
+  const plan = Array.isArray(raw) ? padPlan(raw as Action[], n) : padPlan([], n)
+  try {
+    if (validatePlan(state, side, plan).ok) return plan
+    if (!plan.some((a) => a?.type === 'move')) {
+      for (let i = 0; i < n; i++) {
+        if (plan[i]!.type !== 'wait') continue
+        const units = planUnits(state, side, plan.slice(0, i))
+        for (const u of aliveOf(units, side))
+          for (const to of reachable(state.config, units, u, effMove(u, state.turn))) {
+            const cand = plan.map((a, k) => (k === i ? ({ type: 'move', unit: u.id, to } as Action) : a))
+            if (validatePlan(state, side, cand).ok) return cand
+          }
+      }
+    }
+  } catch {
+    // 형식이 깨진 입력
+  }
+  return fallbackPlan(state, side)
+}
+
+/**
+ * 계획 단계에서 내 행동을 차례로 반영한 판 (행동 1에서 옮긴 유닛은 행동 2부터 옮긴 자리 기준).
+ * 상대 행동은 모르므로 반영하지 않는다. 규칙에 안 맞는 행동은 건너뜀.
+ */
+export function planUnits(state: GameState, side: Side, actions: readonly Action[]): Record<UnitId, UnitState> {
+  const units = cloneUnits(state.units)
+  for (const a of actions) {
+    if (a.type === 'wait' || actionError(state, units, side, a)) continue
+    const u = units[a.unit]!
+    if (a.type === 'move') u.pos = { ...a.to }
+    if (a.type === 'skill') applySelfBuffForPlanning(state, u)
+  }
+  return units
+}
+
+/** 배치 검증: 내 진영 안, 칸 겹침 없음, 인원 수 일치 */
+export function validateDeployment(state: GameState, side: Side, dep: unknown): Validation {
+  const cfg = state.config
+  const errors: string[] = []
+  if (!Array.isArray(dep) || dep.length !== state.teams[side].length) return validation(['deployment size mismatch'])
+  const seen = new Set<string>()
+  dep.forEach((p: Pos, i) => {
+    if (!p || typeof p.x !== 'number' || typeof p.y !== 'number' || !inZone(cfg, side, p)) errors.push(`${i}: must be in own zone`)
+    else if (seen.has(`${p.x},${p.y}`)) errors.push(`${i}: duplicate cell`)
+    else seen.add(`${p.x},${p.y}`)
+  })
+  return validation(errors)
 }

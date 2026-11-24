@@ -1,4 +1,4 @@
-import type { GameState } from '@war/engine'
+import type { GameState } from '@war/v2'
 
 /**
  * 손님(B) 화면용 상하 반전.

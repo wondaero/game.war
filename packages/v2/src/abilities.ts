@@ -47,3 +47,54 @@ export function abilityValue(inst: UnitInstance, kind: AbilityKind): number | nu
 }
 
 export const isSkillUnit = (inst: UnitInstance) => !!inst.ability && ABILITIES[inst.ability.kind].use === 'skill'
+
+const pctOf = (bp: number) => `${Math.round(bp / 100)}%`
+
+/** 능력 설명 (화면·확률 정보 공통). v = 그 등급 수치 */
+export function abilityDesc(kind: AbilityKind, v: number): string {
+  switch (kind) {
+    case 'armorPierce':
+      return `공격할 때 상대 방어력의 ${pctOf(v)}를 무시`
+    case 'splash':
+      return `조준한 칸 중심 3×3을 공격 (피해 ${pctOf(v)})`
+    case 'heal':
+      return `액션: 아군 1명 회복 (받는 아군 공격력의 ${pctOf(v)})`
+    case 'areaHeal':
+      return `액션: 내 진영 3×3 아군 회복 (받는 아군 공격력의 ${pctOf(v)})`
+    case 'moveRegen':
+      return `이동하면 내 공격력의 ${pctOf(v)}만큼 회복 (턴당 1번)`
+    case 'nullify':
+      return '맞은 적의 다음 행동 1번을 무효로'
+    case 'reflect':
+      return `받은 피해의 ${pctOf(v)}를 때린 적에게 되돌림`
+    case 'lifesteal':
+      return `준 피해의 ${pctOf(v)}만큼 회복`
+    case 'slow':
+      return `맞은 적은 다음 턴 이동수 −${v}`
+    case 'homing':
+      return `칸 대신 적 1명을 지정해 반드시 명중 (피해 ${pctOf(v)})`
+    case 'poison':
+      return `맞은 적은 2턴 동안 턴 끝마다 내 공격력의 ${pctOf(v)} 피해 (중첩)`
+    case 'percentDmg':
+      return `대상 최대 체력의 ${pctOf(v)}만큼 추가 피해`
+    case 'teamArmorUp':
+      return `액션: 아군 전체 방어력 +${v} (2턴, 3턴마다 사용)`
+    case 'teamAtkUp':
+      return `액션: 아군 전체 공격력 +${v} (2턴, 3턴마다 사용)`
+    case 'moveUp':
+      return `액션: 내 이동수 +${v} (2턴, 3턴마다 사용)`
+    case 'allUp':
+      return `액션: 내 공격력·방어력·이동수·체력 +${v} (2턴, 3턴마다 사용)`
+    case 'doping':
+      return `공격력 ×${v / 10000}`
+  }
+}
+
+/** 개체의 능력 이름 + 설명 (없으면 null) */
+export function abilityInfo(inst: UnitInstance): { name: string; desc: string; use: AbilityUse; value: number } | null {
+  const a = inst.ability
+  if (!a) return null
+  const def = ABILITIES[a.kind]
+  const value = def.tiers[a.tier] ?? 0
+  return { name: def.name, desc: abilityDesc(a.kind, value), use: def.use, value }
+}

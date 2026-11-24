@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import type { UnitInstance } from '@war/engine'
-import { gachaCtx, service } from '../services.ts'
+import type { UnitInstance } from '@war/v2'
+import { service, V2_CFG } from '../services.ts'
+import { imageOf } from '../ui/format.ts'
 import {
   fetchRoom,
   leaveOnlineRoom,
@@ -39,7 +40,7 @@ export function OnlineWaitingRoom({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const started = useRef(false)
-  const need = gachaCtx.config.cardsPerSide
+  const need = V2_CFG.cardsPerSide
 
   useEffect(() => {
     void ensureSession().then(setUid)
@@ -177,7 +178,7 @@ function DeckLine({ deck, need }: { deck: UnitInstance[] | null; need: number })
         <div className="deck-chips">
           {deck.map((u) => (
             <span key={u.id} className="tag">
-              {gachaCtx.catalog[u.champId]?.name ?? u.champId}
+              {imageOf(u.image).emoji} {imageOf(u.image).name}{u.ability ? ' ✦' : ''}
             </span>
           ))}
         </div>

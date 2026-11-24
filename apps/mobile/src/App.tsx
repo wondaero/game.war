@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
-import { createGame, type GameResult, type UnitInstance } from '@war/engine'
-import { buildAiDeck, RuleAIController } from '@war/ai'
+import { createGame, randomDeck, type GameResult, type UnitInstance } from '@war/v2'
 import type { Wallet } from '@war/core'
-import { HumanController, LocalMatch, type MatchView } from './match.ts'
-import { gachaCtx, service, setServiceMode } from './services.ts'
+import { AiController, HumanController, LocalMatch, type MatchView } from './match.ts'
+import { service, setServiceMode, V2_CFG } from './services.ts'
 import { DeployScreen } from './ui/DeployScreen.tsx'
 import { PlanScreen } from './ui/PlanScreen.tsx'
 import { Playback } from './ui/Playback.tsx'
@@ -32,22 +31,16 @@ interface MatchLike {
 
 function startAiMatch(deck: UnitInstance[], room: Room): LocalMatch {
   const seed = crypto.getRandomValues(new Uint32Array(1))[0]!
-  // AI 덱도 플레이어와 같은 개체 생성 로직으로
-  const state = createGame({
-    teams: { A: deck, B: buildAiDeck(gachaCtx, seed, Date.now()) },
-    config: { turnTimeLimitMs: room.turnSeconds * 1000 },
-  })
-  const match = new LocalMatch(state, new HumanController('A'), new RuleAIController('B', seed))
+  // AI 덱도 플레이어와 같은 뽑기 규칙으로 (그림 겹침 없이 무작위 4명)
+  const state = createGame({ A: deck, B: randomDeck(V2_CFG, seed) }, V2_CFG)
+  const match = new LocalMatch(state, new HumanController('A'), new AiController('B', seed), room.turnSeconds * 1000)
   void match.run()
   return match
 }
 
 function startOnline(m: OnlineMatchRow, side: 'A' | 'B'): OnlineMatch {
-  const state = createGame({
-    teams: { A: m.host_deck, B: m.guest_deck! },
-    config: { turnTimeLimitMs: m.turn_seconds * 1000 },
-  })
-  const match = new OnlineMatch(state, m.id, side)
+  const state = createGame({ A: m.host_deck, B: m.guest_deck! }, V2_CFG)
+  const match = new OnlineMatch(state, m.id, side, m.turn_seconds * 1000)
   void match.run()
   return match
 }
@@ -70,14 +63,21 @@ function MatchScreen({ match, onExit }: { match: MatchLike; onExit: (result: Gam
         <button onClick={() => onExit(null)}>나가기</button>
       </div>
     )
-  if (playback) return <Playback before={playback.before} log={playback.log} onDone={() => match.finishPlayback()} />
+  if (playback)
+    return <Playback before={playback.before} after={playback.after} log={playback.log} onDone={() => match.finishPlayback()} />
   if (state.phase === 'over' && state.result) {
     const w = state.result.winner
     return (
       <div className="screen center">
         <h1>{w === 'draw' ? '무승부' : w === 'A' ? '승리!' : '패배'}</h1>
         <p className="hint">
-          {state.result.reason === 'maxTurns' ? `최대 ${state.config.maxTurns}턴 도달 — 남은 체력 비율 판정` : '상대 전멸'}
+          {state.result.reason === 'maxTurns'
+            ? `최대 ${state.config.maxTurns}턴 도달 — 남은 체력 비율 판정`
+            : w === 'draw'
+              ? '양쪽 동시 전멸'
+              : w === 'A'
+                ? '상대 전멸'
+                : '내 유닛 전멸'}
         </p>
         <button className="primary" onClick={() => onExit(state.result)}>
           대기실로

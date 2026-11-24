@@ -54,6 +54,8 @@ export interface UnitInstance {
   image: string
   stats: Stats
   ability: Ability | null
+  /** 획득 시각 (보관함 정렬용, 성능 무관) */
+  createdAt?: number
 }
 
 export type UnitId = string

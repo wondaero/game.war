@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { STAT_KEYS, type StatKey, type UnitInstance } from '@war/engine'
+import { ABILITY_KINDS, ABILITIES, STAT_KEYS, type StatKey, type UnitInstance } from '@war/v2'
 import type { Wallet } from '@war/core'
-import { gachaCtx, service } from '../services.ts'
+import { service, V2_CFG } from '../services.ts'
 import { CardInfo } from './CardInfo.tsx'
-import { costText, CURRENCY_LABEL, SPECIAL_LABEL, specialText, STAT_LABEL } from './format.ts'
+import { costText, CURRENCY_LABEL, IMAGE_INFO, imageOf, STAT_LABEL } from './format.ts'
 import { UnitRow } from './UnitRow.tsx'
 
-const statSum = (u: UnitInstance) => STAT_KEYS.reduce((s, k) => s + u.stats[k], 0)
+const statSum = (u: UnitInstance) => u.stats.atk + u.stats.armor * 3 + u.stats.hp / 2
 
 function useUnits(version: number) {
   const [units, setUnits] = useState<UnitInstance[] | null>(null)
@@ -38,9 +38,13 @@ export function GachaScreen({ onChanged, onOpen }: { onChanged: () => void; onOp
       setBusy(false)
     }
   }
+  const lucky = result.filter((u) => u.ability).length
   return (
     <div className="screen-body">
       <h2>뽑기</h2>
+      <p className="hint">
+        캐릭터 1명을 뽑습니다. 그림·능력치가 정해지고, {Math.round(V2_CFG.abilityChanceBp / 100)}% 확률로 특수능력이 1개 붙습니다.
+      </p>
       <div className="row">
         <button className="primary" disabled={busy} onClick={() => doPull(1)}>
           1회 · {costText(service.pullCost(1))}
@@ -51,6 +55,7 @@ export function GachaScreen({ onChanged, onOpen }: { onChanged: () => void; onOp
       </div>
       {!service.chargesResources && <p className="hint">개발 모드: 자원이 차감되지 않습니다</p>}
       <ErrorLine error={error} />
+      {result.length > 0 && <p className="hint">특수능력 {lucky}명 / {result.length}명</p>}
       <div className="list">
         {result.map((u) => (
           <UnitRow key={u.id} unit={u} onClick={() => onOpen(u.id)} badge="NEW" />
@@ -62,27 +67,36 @@ export function GachaScreen({ onChanged, onOpen }: { onChanged: () => void; onOp
 
 // ───────────── 보관함 ─────────────
 
-type SortKey = 'new' | StatKey | 'sum'
-const SORT_LABEL: Record<SortKey, string> = { new: '최신순', hp: '체력', atk: '공격력', armor: '방어력', sum: '능력치 합' }
+type SortKey = 'new' | StatKey | 'ability'
+const SORT_LABEL: Record<SortKey, string> = {
+  new: '최신순',
+  ability: '특수능력',
+  atk: '공격력',
+  armor: '방어력',
+  hp: '체력',
+  move: '이동',
+  range: '사거리',
+}
 
 export function InventoryScreen({ version, onOpen }: { version: number; onOpen: (id: string) => void }) {
   const units = useUnits(version)
-  const [champ, setChamp] = useState('all')
+  const [image, setImage] = useState('all')
   const [sort, setSort] = useState<SortKey>('new')
   const shown = useMemo(() => {
-    const list = (units ?? []).filter((u) => champ === 'all' || u.champId === champ)
-    const key = (u: UnitInstance) => (sort === 'new' ? u.createdAt : sort === 'sum' ? statSum(u) : u.stats[sort])
+    const list = (units ?? []).filter((u) => image === 'all' || u.image === image)
+    const key = (u: UnitInstance) =>
+      sort === 'new' ? (u.createdAt ?? 0) : sort === 'ability' ? (u.ability ? 1000 : 0) + statSum(u) : u.stats[sort]
     return [...list].sort((a, b) => key(b) - key(a))
-  }, [units, champ, sort])
+  }, [units, image, sort])
   return (
     <div className="screen-body">
       <h2>보관함 ({units?.length ?? 0})</h2>
       <div className="row">
-        <select value={champ} onChange={(e) => setChamp(e.target.value)}>
-          <option value="all">전체 챔프</option>
-          {Object.values(gachaCtx.catalog).map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
+        <select value={image} onChange={(e) => setImage(e.target.value)}>
+          <option value="all">전체 그림</option>
+          {Object.entries(IMAGE_INFO).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v.emoji} {v.name}
             </option>
           ))}
         </select>
@@ -94,7 +108,7 @@ export function InventoryScreen({ version, onOpen }: { version: number; onOpen: 
           ))}
         </select>
       </div>
-      {units && units.length === 0 && <p className="hint">보유 유닛이 없습니다. 뽑기에서 얻으세요.</p>}
+      {units && units.length === 0 && <p className="hint">보유 유닛이 없습니다. 상점 → 뽑기에서 얻으세요.</p>}
       <div className="list">
         {shown.map((u) => (
           <UnitRow key={u.id} unit={u} onClick={() => onOpen(u.id)} />
@@ -104,138 +118,45 @@ export function InventoryScreen({ version, onOpen }: { version: number; onOpen: 
   )
 }
 
-// ───────────── 유닛 상세 · 리롤 ─────────────
+// ───────────── 유닛 상세 ─────────────
 
-export function UnitDetail({ id, onBack, onReroll }: { id: string; onBack: () => void; onReroll: () => void }) {
+export function UnitDetail({ id, onBack }: { id: string; onBack: () => void }) {
   const [unit, setUnit] = useState<UnitInstance | null | undefined>(undefined)
   useEffect(() => {
     void service.getUnit(id).then(setUnit)
   }, [id])
   if (unit === undefined) return null
-  if (!unit) return <div className="screen-body">유닛을 찾을 수 없습니다. <button onClick={onBack}>뒤로</button></div>
-  const c = gachaCtx.catalog[unit.champId]!
+  if (!unit)
+    return (
+      <div className="screen-body">
+        유닛을 찾을 수 없습니다. <button onClick={onBack}>뒤로</button>
+      </div>
+    )
   return (
     <div className="screen-body">
       <button className="back" onClick={onBack}>
         ← 뒤로
       </button>
-      <CardInfo champ={c} unit={unit} />
-      <p className="hint">
-        획득 {new Date(unit.createdAt).toLocaleString()} · 리롤 {unit.rerollCount}회 · 특수능력 슬롯 {c.specialSlots}
-      </p>
-      <button className="primary" onClick={onReroll}>
-        능력치 리롤
-      </button>
-    </div>
-  )
-}
-
-export function RerollScreen({ id, onBack, onChanged }: { id: string; onBack: () => void; onChanged: () => void }) {
-  const [unit, setUnit] = useState<UnitInstance | null>(null)
-  const [locks, setLocks] = useState<StatKey[]>([])
-  const [last, setLast] = useState<{ before: UnitInstance; after: UnitInstance } | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  useEffect(() => {
-    void service.getUnit(id).then(setUnit)
-  }, [id])
-  if (!unit) return null
-  const c = gachaCtx.catalog[unit.champId]!
-  const maxLocks = gachaCtx.config.maxStatLocks
-  const toggle = (k: StatKey) =>
-    setLocks((l) => (l.includes(k) ? l.filter((x) => x !== k) : l.length < maxLocks ? [...l, k] : l))
-  const cost = service.rerollCost({ stats: locks })
-
-  const doReroll = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      const r = await service.reroll(unit.id, { stats: locks })
-      setLast({ before: r.before, after: r.after })
-      setUnit(r.after)
-      onChanged()
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="screen-body">
-      <button className="back" onClick={onBack}>
-        ← 뒤로
-      </button>
-      <h2>{c.name} 리롤</h2>
-      <p className="hint">
-        일반 능력치와 특수능력을 다시 정합니다. 최대 {maxLocks}개 능력치를 잠가 유지할 수 있습니다. 이동거리·사거리·슬롯 수는
-        변하지 않습니다.
-      </p>
-      <div className="lock-list">
-        {STAT_KEYS.map((k) => {
-          const r = c.statRanges[k]
-          const on = locks.includes(k)
-          return (
-            <button key={k} className={`lock ${on ? 'on' : ''}`} onClick={() => toggle(k)} disabled={!on && locks.length >= maxLocks}>
-              <span>{on ? '🔒' : '🔓'}</span>
-              <span className="lock-name">{STAT_LABEL[k]}</span>
-              <b>{unit.stats[k]}</b>
-              <span className="hint">
-                ({r.min}~{r.max})
-              </span>
-            </button>
-          )
-        })}
-      </div>
-      <div className="card-info">
-        {unit.specials.map((s, i) => (
-          <div key={i} className="ci-effect">
-            ✦ {SPECIAL_LABEL[s.kind]}: {specialText(s)}
-          </div>
-        ))}
-      </div>
-      <button className="primary" disabled={busy} onClick={doReroll}>
-        리롤 · {costText(cost)} {locks.length > 0 && `(잠금 ${locks.length}개 · ×${gachaCtx.table.lockMultiplier[locks.length]})`}
-      </button>
-      <ErrorLine error={error} />
-      {last && <Compare before={last.before} after={last.after} />}
-    </div>
-  )
-}
-
-function Compare({ before, after }: { before: UnitInstance; after: UnitInstance }) {
-  return (
-    <div className="compare">
-      <h3>변경 전 → 후</h3>
-      <table>
+      <CardInfo unit={unit} />
+      <table className="stat-table">
         <tbody>
           {STAT_KEYS.map((k) => {
-            const d = after.stats[k] - before.stats[k]
+            const r = V2_CFG.statRanges[k]
             return (
               <tr key={k}>
                 <td>{STAT_LABEL[k]}</td>
-                <td>{before.stats[k]}</td>
-                <td>→</td>
                 <td>
-                  <b>{after.stats[k]}</b>
+                  <b>{unit.stats[k]}</b>
                 </td>
-                <td className={d > 0 ? 'up' : d < 0 ? 'down' : ''}>{d > 0 ? `▲${d}` : d < 0 ? `▼${-d}` : '–'}</td>
+                <td className="hint">
+                  ({r.min}~{r.max})
+                </td>
               </tr>
             )
           })}
-          {after.specials.map((s, i) => (
-            <tr key={`s${i}`}>
-              <td>슬롯 {i + 1}</td>
-              <td colSpan={2}>{before.specials[i] ? `${SPECIAL_LABEL[before.specials[i]!.kind]} ${specialText(before.specials[i]!)}` : '-'}</td>
-              <td colSpan={2}>
-                <b>
-                  {SPECIAL_LABEL[s.kind]} {specialText(s)}
-                </b>
-              </td>
-            </tr>
-          ))}
         </tbody>
       </table>
+      {unit.createdAt !== undefined && <p className="hint">획득 {new Date(unit.createdAt).toLocaleString()}</p>}
     </div>
   )
 }
@@ -254,13 +175,13 @@ export function DeckScreen({
   const units = useUnits(version)
   const [picked, setPicked] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
-  const need = gachaCtx.config.cardsPerSide
+  const need = V2_CFG.cardsPerSide
   useEffect(() => {
     void service.getDeck().then(setPicked)
   }, [version])
   if (!units) return null
   const byId = new Map(units.map((u) => [u.id, u]))
-  const pickedChamps = new Set(picked.map((id) => byId.get(id)?.champId))
+  const pickedImages = new Set(picked.map((id) => byId.get(id)?.image))
   const toggle = (u: UnitInstance) =>
     setPicked((p) => (p.includes(u.id) ? p.filter((x) => x !== u.id) : p.length < need ? [...p, u.id] : p))
   const start = async () => {
@@ -277,15 +198,24 @@ export function DeckScreen({
       <h2>
         덱 편성 ({picked.length}/{need})
       </h2>
-      <p className="hint">서로 다른 챔프 {need}장을 고르세요. 보유 개체 능력치 그대로 대전에 나갑니다.</p>
-      {units.length === 0 && <p className="hint">보유 유닛이 없습니다. 뽑기에서 얻거나 개발 메뉴에서 지급받으세요.</p>}
+      <p className="hint">{need}명을 고르세요. 같은 그림은 한 명만 넣을 수 있습니다.</p>
+      {units.length === 0 && <p className="hint">보유 유닛이 없습니다. 상점에서 뽑거나 개발 메뉴에서 지급받으세요.</p>}
       <div className="list">
         {[...units]
-          .sort((a, b) => a.champId.localeCompare(b.champId) || statSum(b) - statSum(a))
+          .sort((a, b) => a.image.localeCompare(b.image) || (b.ability ? 1 : 0) - (a.ability ? 1 : 0) || statSum(b) - statSum(a))
           .map((u) => {
             const on = picked.includes(u.id)
-            const blocked = !on && (picked.length >= need || (!gachaCtx.config.allowDuplicateChamps && pickedChamps.has(u.champId)))
-            return <UnitRow key={u.id} unit={u} selected={on} disabled={blocked} onClick={() => toggle(u)} badge={on ? `${picked.indexOf(u.id) + 1}` : undefined} />
+            const blocked = !on && (picked.length >= need || pickedImages.has(u.image))
+            return (
+              <UnitRow
+                key={u.id}
+                unit={u}
+                selected={on}
+                disabled={blocked}
+                onClick={() => toggle(u)}
+                badge={on ? `${picked.indexOf(u.id) + 1}` : undefined}
+              />
+            )
           })}
       </div>
       <ErrorLine error={error} />
@@ -298,7 +228,7 @@ export function DeckScreen({
   )
 }
 
-// ───────────── 확률 정보 (확률표에서 자동 생성) ─────────────
+// ───────────── 확률 정보 (실제 뽑기 설정에서 자동 생성) ─────────────
 
 const p2 = (p: number) => `${(p * 100).toFixed(2)}%`
 
@@ -307,58 +237,48 @@ export function RatesScreen() {
   return (
     <div className="screen-body rates">
       <h2>확률 정보</h2>
-      <p className="hint">아래 내용은 게임이 실제로 사용하는 확률표에서 자동으로 만들어집니다.</p>
-      <h3>등급</h3>
+      <p className="hint">아래 내용은 게임이 실제로 쓰는 뽑기 설정에서 자동으로 만들어집니다.</p>
+      <h3>그림 (성능 무관)</h3>
       <table>
         <tbody>
-          {d.rarities.map((r) => (
-            <tr key={r.id}>
+          {d.images.map((x) => (
+            <tr key={x.image}>
               <td>
-                {r.id} ({r.label})
+                {imageOf(x.image).emoji} {imageOf(x.image).name}
               </td>
-              <td>{p2(r.probability)}</td>
+              <td>{p2(x.probability)}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      <h3>챔프별</h3>
+      <h3>능력치 (범위 안 균등)</h3>
       <table>
         <tbody>
-          {d.champs.map((c) => (
-            <tr key={c.id}>
+          {d.stats.map((s) => (
+            <tr key={s.key}>
+              <td>{STAT_LABEL[s.key as StatKey]}</td>
               <td>
-                {c.name} <span className="tag">{c.rarity}</span>
+                {s.min} ~ {s.max}
               </td>
-              <td>{p2(c.probability)}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      <h3>일반 능력치 구간</h3>
+      <h3>특수능력 (붙을 확률 {p2(d.abilityChance)} · 없음 {p2(1 - d.abilityChance)})</h3>
       <table>
         <tbody>
-          {d.statTiers.map((t) => (
-            <tr key={t.label}>
+          {d.abilities.map((a) => (
+            <tr key={a.kind}>
               <td>
-                {t.label} <span className="tag">{t.range}</span>
+                <b>{a.name}</b>
+                {a.tiers.map((t, i) => (
+                  <div key={i} className="hint">
+                    {a.tiers.length > 1 ? `${i + 1}등급: ` : ''}
+                    {t.desc} ({p2(t.probability)})
+                  </div>
+                ))}
               </td>
-              <td>{p2(t.probability)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <h3>특수능력 (슬롯당)</h3>
-      <table>
-        <tbody>
-          {d.specials.map((s) => (
-            <tr key={s.kind}>
-              <td>
-                {SPECIAL_LABEL[s.kind]}{' '}
-                <span className="tag">
-                  {specialText({ kind: s.kind, value: s.min })} ~ {specialText({ kind: s.kind, value: s.max })}
-                </span>
-              </td>
-              <td>{p2(s.probability)}</td>
+              <td>{p2(a.probability)}</td>
             </tr>
           ))}
         </tbody>
@@ -371,11 +291,8 @@ export function RatesScreen() {
       </ul>
       <h3>비용</h3>
       <ul>
-        <li>뽑기 1회: {costText(d.costs.pull1)}</li>
-        <li>뽑기 10회: {costText(d.costs.pull10)}</li>
-        <li>
-          리롤: {costText(d.costs.reroll)} × 잠금 배율 ({d.lockMultiplier.map((m, i) => `${i}개 ×${m}`).join(', ')})
-        </li>
+        <li>뽑기 1회: {costText(d.costs[1])}</li>
+        <li>뽑기 10회: {costText(d.costs[10])}</li>
       </ul>
     </div>
   )
@@ -397,21 +314,19 @@ export function DevScreen({ onChanged }: { onChanged: () => void }) {
   return (
     <div className="screen-body">
       <h2>개발 메뉴</h2>
-      <p className="hint">자원 차감: {service.chargesResources ? '켜짐' : '꺼짐 (DEV_UNLIMITED_RESOURCES)'}</p>
+      <p className="hint">자원 차감: {service.chargesResources ? '켜짐' : '꺼짐 (개발 모드)'}</p>
       <div className="row">
         <button onClick={() => act('보석 +1000', () => service.dev.addResources({ gem: 1000 }))}>보석 +1000</button>
-        <button onClick={() => act('리롤석 +100', () => service.dev.addResources({ rerollStone: 100 }))}>리롤석 +100</button>
+        <button onClick={() => confirm('보관함을 비울까요?') && act('보관함 초기화', () => service.dev.resetInventory())}>
+          보관함 초기화
+        </button>
       </div>
-      <button
-        onClick={() => confirm('보관함을 비울까요?') && act('보관함 초기화', () => service.dev.resetInventory())}
-      >
-        보관함 초기화
-      </button>
-      <h3>챔프 지급</h3>
+      <h3>능력 지정 지급 (시험용)</h3>
       <div className="grid2">
-        {Object.values(gachaCtx.catalog).map((c) => (
-          <button key={c.id} onClick={() => act(`${c.name} 지급`, () => service.dev.grantChamp(c.id))}>
-            {c.name} <span className="tag">{c.rarity}</span>
+        <button onClick={() => act('능력 없는 유닛 지급', () => service.dev.grantUnit(null))}>능력 없음</button>
+        {ABILITY_KINDS.map((k) => (
+          <button key={k} onClick={() => act(`${ABILITIES[k].name} 지급`, () => service.dev.grantUnit(k))}>
+            {ABILITIES[k].name}
           </button>
         ))}
       </div>
@@ -426,7 +341,7 @@ export function WalletBar({ wallet }: { wallet: Wallet | null }) {
     <div className="wallet">
       {Object.entries(wallet).map(([k, v]) => (
         <span key={k}>
-          {CURRENCY_LABEL[k as keyof Wallet]} {v}
+          {CURRENCY_LABEL[k as keyof Wallet] ?? k} {v}
         </span>
       ))}
       {!service.chargesResources && <span className="tag">∞ DEV</span>}

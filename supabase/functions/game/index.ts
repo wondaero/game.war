@@ -1,5 +1,5 @@
-// 게임 서버 함수 (Deno). 앱의 LocalGameService 를 그대로 서버에서 실행하고, 저장만 DB(saves)로 한다.
-// → 뽑기·리롤 판정과 재화가 서버에만 있으므로 앱에서 결과를 조작할 수 없다.
+// 게임 서버 함수 (Deno). 앱의 LocalGameService(새 규칙 v2)를 그대로 서버에서 실행하고, 저장만 DB(saves)로 한다.
+// → 뽑기 판정과 재화가 서버에만 있으므로 앱에서 결과를 조작할 수 없다.
 // 대전 결과도 여기서 행동 기록을 다시 계산해 확인한 뒤 기록한다.
 //
 // 배포:  node scripts/sync-functions.mjs && npx supabase functions deploy game --use-api --no-verify-jwt
@@ -9,16 +9,15 @@ import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
 import {
   createGame,
   deploy,
-  makeGachaContext,
-  padPlan,
+  makeV2Config,
   resolveTurn,
+  sanitizePlan,
   validateDeployment,
-  validatePlan,
-  type Deployment,
+  type AbilityKind,
   type GameState,
-  type TurnPlan,
+  type Pos,
   type UnitInstance,
-} from '../_shared/engine/index.ts'
+} from '../_shared/v2/index.ts'
 import { LocalGameService, LocalSaveStore, MemoryStorage, type Wallet } from '../_shared/core/index.ts'
 
 const URL = Deno.env.get('SUPABASE_URL')!
@@ -26,7 +25,7 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 /** 개발 단계: 비용 차감 없음 + 개발 메뉴 허용. 정식 서비스 때 GAME_DEV_MODE=false */
 const DEV_MODE = (Deno.env.get('GAME_DEV_MODE') ?? 'true') !== 'false'
 
-const ctx = makeGachaContext()
+const cfg = makeV2Config()
 const SAVE_KEY = 'gamewar:save'
 
 const cors = {
@@ -69,12 +68,6 @@ Deno.serve(async (req) => {
         )
       case 'pull':
         return json(await withSave(admin, uid, (s) => s.pull(args.count === 10 ? 10 : 1)))
-      case 'reroll':
-        return json(
-          await withSave(admin, uid, (s) =>
-            s.reroll(String(args.unitId), args.locks as Parameters<LocalGameService['reroll']>[1]),
-          ),
-        )
       case 'setDeck':
         return json(await withSave(admin, uid, (s) => s.setDeck((args.unitIds as string[]) ?? [])))
       case 'dev.addResources':
@@ -83,9 +76,9 @@ Deno.serve(async (req) => {
       case 'dev.resetInventory':
         devOnly()
         return json(await withSave(admin, uid, (s) => s.dev.resetInventory()))
-      case 'dev.grantChamp':
+      case 'dev.grantUnit':
         devOnly()
-        return json(await withSave(admin, uid, (s) => s.dev.grantChamp(String(args.champId))))
+        return json(await withSave(admin, uid, (s) => s.dev.grantUnit((args.ability as AbilityKind | null) ?? null)))
       case 'finishMatch':
         return json(await finishMatch(admin, uid, String(args.matchId)))
       default:
@@ -113,7 +106,7 @@ async function withSave<T>(admin: SupabaseClient, uid: string, fn: (s: LocalGame
     const before = row ? JSON.stringify(row.data) : null
     if (before) mem.setItem(SAVE_KEY, before)
     const store = new LocalSaveStore(mem, { newSeed: () => crypto.getRandomValues(new Uint32Array(1))[0]! })
-    const service = new LocalGameService({ ctx, uow: store, unlimitedResources: DEV_MODE })
+    const service = new LocalGameService({ config: cfg, uow: store, unlimitedResources: DEV_MODE })
     const result = await fn(service)
     const after = mem.getItem(SAVE_KEY)
     if (!after || after === before) return result
@@ -140,7 +133,7 @@ async function withSave<T>(admin: SupabaseClient, uid: string, fn: (s: LocalGame
 
 /**
  * 대전 결과 확인: 저장된 덱 + 양쪽 행동 기록으로 처음부터 다시 계산해서 승패를 정한다.
- * (앱과 같은 규칙: 잘못된 계획은 전부 대기로 처리)
+ * (앱과 같은 규칙: sanitizePlan 으로 정리)
  */
 async function finishMatch(admin: SupabaseClient, uid: string, matchId: string) {
   const { data: m, error } = await admin.from('matches').select('*').eq('id', matchId).maybeSingle()
@@ -157,24 +150,20 @@ async function finishMatch(admin: SupabaseClient, uid: string, matchId: string) 
   if (e2) throw new Error(e2.message)
   const at = (turn: number, side: 'A' | 'B') => moves?.find((x) => x.turn === turn && x.side === side)?.payload
 
-  let s: GameState = createGame({
-    teams: { A: m.host_deck as UnitInstance[], B: m.guest_deck as UnitInstance[] },
-    config: { turnTimeLimitMs: m.turn_seconds * 1000 },
-  })
-  const depA = at(0, 'A') as Deployment | undefined
-  const depB = at(0, 'B') as Deployment | undefined
+  let s: GameState = createGame({ A: m.host_deck as UnitInstance[], B: m.guest_deck as UnitInstance[] }, cfg)
+  const depA = at(0, 'A') as Pos[] | undefined
+  const depB = at(0, 'B') as Pos[] | undefined
   if (!depA || !depB) return { pending: true }
   if (!validateDeployment(s, 'A', depA).ok || !validateDeployment(s, 'B', depB).ok)
     throw new HttpError(409, '배치 기록이 올바르지 않습니다')
   s = deploy(s, { A: depA, B: depB })
 
-  const n = s.config.actionsPerTurn
   while (s.phase === 'plan') {
-    const a = at(s.turn, 'A') as TurnPlan | undefined
-    const b = at(s.turn, 'B') as TurnPlan | undefined
-    if (!a || !b) return { pending: true, turn: s.turn }
-    const plans = { A: padPlan(a, n), B: padPlan(b, n) }
-    for (const side of ['A', 'B'] as const) if (!validatePlan(s, side, plans[side]).ok) plans[side] = padPlan([], n)
+    const a = at(s.turn, 'A')
+    const b = at(s.turn, 'B')
+    if (a === undefined || b === undefined) return { pending: true, turn: s.turn }
+    // 앱과 같은 규칙으로 정리 (규칙에 안 맞는 계획은 앱도 서버도 똑같이 바꿈)
+    const plans = { A: sanitizePlan(s, 'A', a), B: sanitizePlan(s, 'B', b) }
     s = resolveTurn(s, plans).state
   }
   const winner = s.result!.winner

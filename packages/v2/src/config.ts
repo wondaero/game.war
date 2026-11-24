@@ -17,8 +17,12 @@ export interface V2Config {
   actionsPerTurn: number
   /** 턴마다 최소 이동 횟수 (이동할 수 있는 유닛이 하나도 없으면 면제) */
   minMovesPerTurn: number
-  /** 살아 있는 유닛이 이 수 이하이면 같은 유닛 여러 행동 허용 */
-  multiActionWhenCardsAtMost: number
+  /** 유닛 하나가 한 턴에 할 수 있는 행동 수. index = 내 살아 있는 유닛 수 (없으면 1) */
+  actionsPerUnitByAlive: readonly number[]
+  /** 한 턴 액션(공격·행동형 능력) 최대 횟수 (팀 전체). 이동·대기는 액션이 아님 */
+  maxActsPerTurn: number
+  /** 유닛 하나의 한 턴 액션 횟수. index = 내 살아 있는 유닛 수 (없으면 1) */
+  actsPerUnitByAlive: readonly number[]
 
   maxTurns: number
   /** 최대 턴 판정: 남은 체력 비율(남은/최대) 또는 남은 체력 합 */
@@ -55,7 +59,10 @@ export const DEFAULT_V2_CONFIG: Readonly<V2Config> = Object.freeze({
 
   actionsPerTurn: 3,
   minMovesPerTurn: 1,
-  multiActionWhenCardsAtMost: 2,
+  // 규칙 ② (시뮬레이션 비교로 결정): 행동은 같은 캐릭이 여러 번 가능, 액션(공격·마법·회복)은 턴당 2번·캐릭당 1번
+  actionsPerUnitByAlive: [0, 3, 3, 3, 3],
+  maxActsPerTurn: 2,
+  actsPerUnitByAlive: [0, 1, 1, 1, 1],
 
   maxTurns: 20,
   judgeBy: 'hpRatio',

@@ -19,7 +19,7 @@ import {
 import { hitDamage, skillHealAmount } from './combat.ts'
 import { applyBp } from './config.ts'
 import type { Action, GameState, Pos, Side, TurnPlan, UnitId, UnitInstance, UnitState } from './types.ts'
-import { actionError, anyMovePossible, canRepeat, cloneUnits, validatePlan } from './validate.ts'
+import { actionError, actionsPerUnit, actsPerUnit, anyMovePossible, cloneUnits, fallbackPlan, validatePlan } from './validate.ts'
 import { resolveTurn } from './resolve.ts'
 
 /**
@@ -99,10 +99,13 @@ export function planTurn(
   const pAt = (e: UnitId, cells: Pos[]) => cells.reduce((s, c) => s + (where.get(e)?.get(posKey(c)) ?? 0), 0)
   const virtualHp = new Map<UnitId, number>(Object.values(units).map((u) => [u.id, u.hp]))
 
-  const repeatOk = canRepeat(state, side)
+  const cap = actionsPerUnit(state, side)
+  const actCap = actsPerUnit(state, side)
+  const unitActs = new Map<UnitId, number>()
   const mustMove = anyMovePossible(state, side)
-  const used = new Set<UnitId>()
+  const used = new Map<UnitId, number>()
   let moves = 0
+  let acts = 0
   const plan: Action[] = []
 
   for (let slot = 0; slot < cfg.actionsPerTurn; slot++) {
@@ -112,10 +115,12 @@ export function planTurn(
     const fixed = opts.prefix?.[slot]
     if (fixed) cands.push({ action: fixed, score: 1e9 })
     else for (const u of aliveOf(units, side)) {
-      if (used.has(u.id) && !repeatOk) continue
+      if ((used.get(u.id) ?? 0) >= cap) continue
       if (!needMove) {
-        cands.push(...attackCands(state, units, u, w, pAt, virtualHp, opts.avoid))
-        cands.push(...skillCands(state, units, u, w))
+        if (acts < cfg.maxActsPerTurn && (unitActs.get(u.id) ?? 0) < actCap) {
+          cands.push(...attackCands(state, units, u, w, pAt, virtualHp, opts.avoid))
+          cands.push(...skillCands(state, units, u, w))
+        }
       }
       cands.push(...moveCands(state, units, u, w, remaining))
     }
@@ -128,7 +133,11 @@ export function planTurn(
     }
     const a = best.action
     plan.push(a)
-    used.add(a.unit)
+    used.set(a.unit, (used.get(a.unit) ?? 0) + 1)
+    if (a.type === 'attack' || a.type === 'skill') {
+      acts++
+      unitActs.set(a.unit, (unitActs.get(a.unit) ?? 0) + 1)
+    }
     const u = units[a.unit]!
     if (a.type === 'move') {
       u.pos = { ...a.to }
@@ -149,20 +158,6 @@ export function planTurn(
   }
   if (validatePlan(state, side, plan).ok) return plan
   return fallbackPlan(state, side)
-}
-
-/** 안전장치: 아무 유닛이나 첫 이동 가능 칸으로 이동 + 나머지 대기 */
-function fallbackPlan(state: GameState, side: Side): TurnPlan {
-  const out: Action[] = []
-  for (const u of aliveOf(state.units, side)) {
-    const r = reachable(state.config, state.units, u, effMove(u, state.turn))
-    if (r.length) {
-      out.push({ type: 'move', unit: u.id, to: r[0]! })
-      break
-    }
-  }
-  while (out.length < state.config.actionsPerTurn) out.push({ type: 'wait' })
-  return out
 }
 
 function hitValue(state: GameState, units: Record<UnitId, UnitState>, u: UnitState, e: UnitState, hp: number, w: AiWeights) {

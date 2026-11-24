@@ -1,5 +1,5 @@
-import { makeGachaContext } from '@war/engine'
 import { LocalGameService, LocalSaveStore, type GameService } from '@war/core'
+import { makeV2Config } from '@war/v2'
 import { RemoteGameService } from './online/remoteService.ts'
 
 /**
@@ -8,14 +8,14 @@ import { RemoteGameService } from './online/remoteService.ts'
  * - 온라인: 서버 함수 game 이 판정·저장 (RemoteGameService)
  * 게임 입장 때 setServiceMode 로 바꾼다. 화면은 항상 같은 `service` 를 쓴다.
  */
-export const gachaCtx = makeGachaContext()
+export const V2_CFG = makeV2Config()
 
 const store = new LocalSaveStore(window.localStorage, {
   newSeed: () => crypto.getRandomValues(new Uint32Array(1))[0]!,
 })
 
-const local = new LocalGameService({ ctx: gachaCtx, uow: store })
-const remote = new RemoteGameService(gachaCtx)
+const local = new LocalGameService({ uow: store, config: V2_CFG })
+const remote = new RemoteGameService(V2_CFG)
 let current: GameService = local
 
 export function setServiceMode(mode: 'online' | 'offline') {

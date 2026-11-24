@@ -1,4 +1,4 @@
-import type { CurrencyId, RngState, UnitInstance } from '@war/engine'
+import type { CurrencyId, RngState, UnitInstance } from '@war/v2'
 
 /**
  * 저장소 추상화. UI·게임 로직은 이 인터페이스만 안다 (localStorage 직접 접근 금지).
