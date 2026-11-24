@@ -76,12 +76,13 @@ describe('이동: 아군 건너뛰기', () => {
     expect(keys(reachable(s.config, s.units, s.units.A0!, 1))).toEqual(['0,4', '1,3'])
   })
 
-  it('턴마다 이동 최소 1회', () => {
+  it('이동 의무 없음: 대기 3번도 가능 (설정으로 켜면 이동 최소 1회)', () => {
     const s = board([
       { id: 'A0', side: 'A', pos: { x: 0, y: 5 } },
       { id: 'B0', side: 'B', pos: { x: 0, y: 0 } },
     ])
-    expect(validatePlan(s, 'A', [W, W, W]).ok).toBe(false)
+    expect(validatePlan(s, 'A', [W, W, W]).ok).toBe(true)
+    expect(validatePlan({ ...s, config: { ...s.config, minMovesPerTurn: 1 } }, 'A', [W, W, W]).ok).toBe(false)
     expect(validatePlan(s, 'A', [{ type: 'move', unit: 'A0', to: { x: 1, y: 5 } }, W, W]).ok).toBe(true)
   })
 

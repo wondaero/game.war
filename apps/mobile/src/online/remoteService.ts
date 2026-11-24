@@ -1,4 +1,4 @@
-import { describeRates, pullCost, type AbilityKind, type Cost, type UnitInstance, type V2Config } from '@war/v2'
+import { describeRates, pullCost, REROLL_COST, type AbilityKind, type Cost, type StatKey, type UnitInstance, type V2Config } from '@war/v2'
 import type { GameService, Wallet } from '@war/core'
 import { ensureSession, supabase } from './supabase.ts'
 
@@ -53,6 +53,16 @@ export class RemoteGameService implements GameService {
   }
   async setDeck(unitIds: string[]) {
     await this.call('setDeck', { unitIds })
+  }
+
+  merge(unitIds: string[]) {
+    return this.call<{ gained: number; wallet: Wallet }>('merge', { unitIds })
+  }
+  rerollCost(): Cost {
+    return { ...REROLL_COST }
+  }
+  reroll(unitId: string, lock: StatKey | null) {
+    return this.call<{ before: UnitInstance; after: UnitInstance; cost: Cost; wallet: Wallet }>('reroll', { unitId, lock })
   }
 
   describeRates() {

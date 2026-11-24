@@ -12,7 +12,18 @@ import {
   UnitDetail,
   WalletBar,
 } from '../ui/screens.tsx'
-import { createRoom, listRooms, loadProfile, saveProfile, TURN_SECONDS, type Profile, type Room } from './store.ts'
+import {
+  createRoom,
+  listRooms,
+  loadPracticeSeconds,
+  loadProfile,
+  PRACTICE_SECONDS,
+  saveProfile,
+  secondsLabel,
+  TURN_SECONDS,
+  type Profile,
+  type Room,
+} from './store.ts'
 import { createOnlineRoom, fetchRooms, joinOnlineRoom, upsertProfile, watchRooms, type OnlineRoom } from '../online/net.ts'
 
 /** 들어간 방: 이 기기 안의 AI 연습방 또는 서버 방 */
@@ -92,7 +103,7 @@ export function LobbyScreen(p: LobbyProps) {
   const open = (id: string) => setOverlay({ kind: 'unit', id })
   let body
   if (overlay?.kind === 'unit')
-    body = <UnitDetail id={overlay.id} onBack={() => setOverlay(null)} />
+    body = <UnitDetail id={overlay.id} onBack={() => setOverlay(null)} onChanged={p.onChanged} />
   else if (p.tab === 'rooms')
     body = p.online ? (
       <OnlineRoomList onJoin={p.onJoin} onCreate={() => p.onTab('create')} />
@@ -169,7 +180,7 @@ function RoomList({ onJoin, onCreate }: { onJoin: (r: Room) => void; onCreate: (
                 {r.title}
               </span>
               <span className="hint">
-                {r.host} · 턴 {r.turnSeconds}초{r.mine ? ' · 내 방' : ''}
+                {r.host} · 턴 {secondsLabel(r.turnSeconds)}{r.mine ? ' · 내 방' : ''}
               </span>
             </div>
             <div className="room-side">
@@ -229,7 +240,9 @@ function OnlineRoomList({ onJoin, onCreate }: { onJoin: (j: Joined) => void; onC
         <h2>방 목록</h2>
         <button onClick={() => void refresh()}>새로고침</button>
       </div>
-      <button onClick={() => onJoin({ kind: 'local', room: PRACTICE_ROOM })}>🤖 AI와 연습하기</button>
+      <button onClick={() => onJoin({ kind: 'local', room: { ...PRACTICE_ROOM, turnSeconds: loadPracticeSeconds() } })}>
+        🤖 AI와 연습하기 <span className="tag">턴 {secondsLabel(loadPracticeSeconds())}</span>
+      </button>
       {rooms === null && !error && <p className="hint">불러오는 중…</p>}
       {rooms?.length === 0 && <p className="hint">열린 방이 없습니다. 방을 만들어 보세요.</p>}
       <div className="list">
@@ -303,9 +316,9 @@ function CreateRoom({ host, online, onCreated }: { host: string; online: boolean
       <div className="field">
         <span>턴 입력 제한 시간</span>
         <div className="row">
-          {TURN_SECONDS.map((s) => (
+          {(online ? TURN_SECONDS : PRACTICE_SECONDS).map((s) => (
             <button key={s} className={turnSeconds === s ? 'on' : ''} onClick={() => setTurnSeconds(s)}>
-              {s}초
+              {secondsLabel(s)}
             </button>
           ))}
         </div>
@@ -358,7 +371,7 @@ export function WaitingRoom({
         <button className="ghost" onClick={onLeave}>
           ← 방 나가기
         </button>
-        <span className="hint">턴 {room.turnSeconds}초</span>
+        <span className="hint">턴 {secondsLabel(room.turnSeconds)}</span>
       </div>
       <h2>
         {room.password && '🔒 '}
@@ -471,7 +484,7 @@ function MyInfo({
           {saved && <p className="hint">덱을 저장했습니다.</p>}
         </>
       )}
-      {section === 'inventory' && <InventoryScreen version={version} onOpen={onOpen} />}
+      {section === 'inventory' && <InventoryScreen version={version} onOpen={onOpen} onChanged={onChanged} />}
       {section === 'dev' && <DevScreen onChanged={onChanged} />}
     </div>
   )

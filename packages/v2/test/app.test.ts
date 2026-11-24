@@ -79,11 +79,13 @@ describe('계획 정리 (시간 초과·잘못된 입력)', () => {
     expect(sanitizePlan(s, 'A', p)).toEqual(p)
   })
 
-  it('이동이 없으면 빈 칸에 이동을 채우고 공격은 살림', () => {
-    const p = sanitizePlan(s, 'A', [atk])
-    expect(p[0]).toEqual(atk)
-    expect(p.filter((a) => a.type === 'move')).toHaveLength(1)
-    expect(validatePlan(s, 'A', p).ok).toBe(true)
+  it('이동이 없어도 그대로 (이동 의무 없음), 아무것도 안 내면 대기 3번', () => {
+    expect(sanitizePlan(s, 'A', [atk])).toEqual([atk, W, W])
+    expect(sanitizePlan(s, 'A', [])).toEqual([W, W, W])
+  })
+
+  it('잘못된 계획은 전부 대기', () => {
+    expect(sanitizePlan(s, 'A', [atk, atk])).toEqual([W, W, W]) // 같은 캐릭 액션 2번
   })
 
   it('형식이 깨진 입력도 규칙에 맞는 계획으로', () => {

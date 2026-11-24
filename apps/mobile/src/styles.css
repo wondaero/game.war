@@ -270,3 +270,5 @@ input:focus { outline: 2px solid var(--me); }
 .hint.warn { color: #ffb74d; }
 .stat-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .stat-table td { padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.lock .up { color: #69f0ae; }
+.lock .down { color: var(--enemy); }

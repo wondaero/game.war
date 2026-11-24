@@ -21,6 +21,7 @@ import { applyBp } from './config.ts'
 import type { Action, GameState, Pos, Side, TurnPlan, UnitId, UnitInstance, UnitState } from './types.ts'
 import { actionError, actionsPerUnit, actsPerUnit, anyMovePossible, cloneUnits, fallbackPlan, validatePlan } from './validate.ts'
 import { resolveTurn } from './resolve.ts'
+import { asA } from './mirror.ts'
 
 /**
  * 규칙 기반 AI (밸런스 시뮬레이션용).
@@ -73,7 +74,7 @@ export interface PlanOptions {
 }
 
 /** 탐욕 계획: 행동 칸마다 최고 점수 하나 (혼합 전략 AI의 후보 생성기로도 사용) */
-export function planTurn(
+function planTurnImpl(
   state: GameState,
   side: Side,
   seed: number | string = 0,
@@ -308,7 +309,7 @@ function applySkillToSim(state: GameState, units: Record<UnitId, UnitState>, u: 
 }
 
 /** 배치: 사거리 짧은 유닛부터 앞줄. 같은 줄 안에서는 시드로 섞음 */
-export function planDeployment(state: GameState, side: Side, team: readonly UnitInstance[], seed: number | string = 0): Pos[] {
+function planDeploymentImpl(state: GameState, side: Side, team: readonly UnitInstance[], seed: number | string = 0): Pos[] {
   const cfg = state.config
   const rng = new Rng(createRngState(`${seed}:deploy:${side}`))
   const front = (p: Pos) => (side === 'A' ? p.y - (cfg.boardHeight - cfg.zoneRows) : cfg.zoneRows - 1 - p.y)
@@ -339,7 +340,7 @@ export interface MixedOptions {
 
 export const DEFAULT_MIXED: MixedOptions = { candidates: 14, iterations: 400, weights: DEFAULT_AI }
 
-export function candidatePlans(state: GameState, side: Side, seed: number | string, w: AiWeights, max: number): TurnPlan[] {
+function candidatePlansImpl(state: GameState, side: Side, seed: number | string, w: AiWeights, max: number): TurnPlan[] {
   const cfg = state.config
   const out = new Map<string, TurnPlan>()
   const add = (p: TurnPlan) => {
@@ -419,7 +420,7 @@ export function solveMatrix(M: number[][], iterations: number): number[] {
   return avg.map((x) => x / sum)
 }
 
-export function planTurnMixed(state: GameState, side: Side, seed: number | string = 0, o: MixedOptions = DEFAULT_MIXED): TurnPlan {
+function planTurnMixedImpl(state: GameState, side: Side, seed: number | string = 0, o: MixedOptions = DEFAULT_MIXED): TurnPlan {
   const mine = candidatePlans(state, side, seed, o.weights, o.candidates)
   if (mine.length === 1) return mine[0]!
   const theirs = candidatePlans(state, opponent(side), `${seed}:opp`, o.weights, o.candidates)
@@ -438,4 +439,30 @@ export function planTurnMixed(state: GameState, side: Side, seed: number | strin
     if (r < 0) return mine[i]!
   }
   return mine[0]!
+}
+
+// ───────────── 진영 대칭 ─────────────
+// AI 는 항상 "내가 A(아래)" 인 판에서 생각한다. B 는 판을 뒤집어 A 로 계획하고 결과만 다시 뒤집는다.
+// → 방향 고르는 순서·동점 처리 같은 사소한 차이로 진영마다 다르게 두는 일이 없다.
+
+/** 탐욕 계획: 행동마다 최고 점수 하나 (혼합 전략 AI의 후보 생성기로도 사용) */
+export function planTurn(state: GameState, side: Side, seed: number | string = 0, w: AiWeights = DEFAULT_AI, opts: PlanOptions = {}): TurnPlan {
+  if (side === 'A') return planTurnImpl(state, 'A', seed, w, opts)
+  return asA('B', planTurnImpl(asA('B', state, state), 'A', seed, w, asA('B', opts, state)), state)
+}
+
+/** 배치: 사거리 짧은 유닛부터 앞줄. 같은 줄 안에서는 시드로 섞음 */
+export function planDeployment(state: GameState, side: Side, team: readonly UnitInstance[], seed: number | string = 0): Pos[] {
+  if (side === 'A') return planDeploymentImpl(state, 'A', team, seed)
+  return asA('B', planDeploymentImpl(asA('B', state, state), 'A', team, seed), state)
+}
+
+export function candidatePlans(state: GameState, side: Side, seed: number | string, w: AiWeights, max: number): TurnPlan[] {
+  if (side === 'A') return candidatePlansImpl(state, 'A', seed, w, max)
+  return asA('B', candidatePlansImpl(asA('B', state, state), 'A', seed, w, max), state)
+}
+
+export function planTurnMixed(state: GameState, side: Side, seed: number | string = 0, o: MixedOptions = DEFAULT_MIXED): TurnPlan {
+  if (side === 'A') return planTurnMixedImpl(state, 'A', seed, o)
+  return asA('B', planTurnMixedImpl(asA('B', state, state), 'A', seed, o), state)
 }

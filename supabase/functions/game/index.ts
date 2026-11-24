@@ -16,6 +16,7 @@ import {
   type AbilityKind,
   type GameState,
   type Pos,
+  type StatKey,
   type UnitInstance,
 } from '../_shared/v2/index.ts'
 import { LocalGameService, LocalSaveStore, MemoryStorage, type Wallet } from '../_shared/core/index.ts'
@@ -68,6 +69,10 @@ Deno.serve(async (req) => {
         )
       case 'pull':
         return json(await withSave(admin, uid, (s) => s.pull(args.count === 10 ? 10 : 1)))
+      case 'merge':
+        return json(await withSave(admin, uid, (s) => s.merge((args.unitIds as string[]) ?? [])))
+      case 'reroll':
+        return json(await withSave(admin, uid, (s) => s.reroll(String(args.unitId), (args.lock as StatKey | null) ?? null)))
       case 'setDeck':
         return json(await withSave(admin, uid, (s) => s.setDeck((args.unitIds as string[]) ?? [])))
       case 'dev.addResources':

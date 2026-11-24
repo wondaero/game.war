@@ -225,7 +225,7 @@ export function PlanScreen({
         <span>
           턴 {turn}/{cfg.maxTurns}
         </span>
-        <span className={remaining <= 5 ? 'timer warn' : 'timer'}>{remaining}s</span>
+        <span className={remaining <= 5 ? 'timer warn' : 'timer'}>{Number.isFinite(remaining) ? `${remaining}s` : '∞'}</span>
         <span>
           행동 {actions.length}/{n} · 액션 {actsUsed}/{cfg.maxActsPerTurn}
         </span>
@@ -294,7 +294,12 @@ export function PlanScreen({
         </div>
       )}
 
-      {needMove && <p className="hint warn">이번 턴에 이동을 최소 {cfg.minMovesPerTurn}번 넣어야 합니다</p>}
+      {needMove && (
+        <p className="hint warn">
+          이번 턴에 이동을 최소 {cfg.minMovesPerTurn}번 넣어야 합니다
+          {remaining <= 10 && ' — 시간이 끝나면 이동이 자동으로 들어갑니다'}
+        </p>
+      )}
       <div className="footer">
         {!full && <button onClick={() => push({ type: 'wait' })}>대기</button>}
         <button className="primary" disabled={submitBlocked} onClick={() => onSubmit(plan)}>

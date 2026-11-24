@@ -17,7 +17,7 @@ export const IMAGE_INFO: Record<string, { emoji: string; name: string; color: st
 export const imageOf = (image: string) => IMAGE_INFO[image] ?? { emoji: '❔', name: image, color: '#888' }
 
 export const STAT_LABEL: Record<StatKey, string> = { atk: '공격력', armor: '방어력', hp: '체력', move: '이동', range: '사거리' }
-export const CURRENCY_LABEL: Record<CurrencyId, string> = { gem: '보석' }
+export const CURRENCY_LABEL: Record<CurrencyId, string> = { gem: '보석', rerollStone: '리롤석' }
 
 export function costText(c: Cost): string {
   return (

@@ -49,7 +49,7 @@ export interface Room {
   capacity: number
   status: 'waiting' | 'playing'
   password: string | null
-  /** 턴 입력 제한 시간(초) */
+  /** 턴 입력 제한 시간(초). 0 = 무제한 (AI 연습·오프라인 전용) */
   turnSeconds: number
   /** 지금은 서버가 없어 상대는 AI */
   ai: boolean
@@ -63,6 +63,19 @@ export interface NewRoom {
 }
 
 export const TURN_SECONDS = [15, 30, 60] as const
+/** AI 연습·오프라인 방에서 고를 수 있는 제한시간 (0 = 무제한). 온라인 대전은 무제한 불가 */
+export const PRACTICE_SECONDS = [15, 30, 60, 0] as const
+export const secondsLabel = (s: number) => (s > 0 ? `${s}초` : '무제한')
+
+const PRACTICE_KEY = 'gamewar:practiceSeconds'
+/** 개발 메뉴에서 정하는 AI 연습 제한시간 (기본 30초) */
+export function loadPracticeSeconds(): number {
+  const v = Number(localStorage.getItem(PRACTICE_KEY) ?? 30)
+  return (PRACTICE_SECONDS as readonly number[]).includes(v) ? v : 30
+}
+export function savePracticeSeconds(s: number) {
+  localStorage.setItem(PRACTICE_KEY, String(s))
+}
 
 /** 서버 연결 전 임시 방 (AI 상대) */
 const SAMPLE_ROOMS: Room[] = [

@@ -179,15 +179,15 @@ export function fallbackPlan(state: GameState, side: Side): TurnPlan {
 /**
  * 제출된 계획을 규칙에 맞게 정리 (앱·상대 기기·서버가 같은 결과를 내도록 결정적).
  * 1) 그대로 맞으면 그대로
- * 2) 이동이 하나도 없어서 틀린 거면, 빈 칸(대기) 하나를 가능한 첫 이동으로 바꿔 봄 (시간 초과 대비)
- * 3) 그래도 안 되면 안전장치 계획
+ * 2) (이동 의무 규칙을 켠 경우만) 이동이 없어서 틀린 거면, 대기 하나를 가능한 첫 이동으로 바꿔 봄
+ * 3) 그래도 안 되면 전부 대기 (이동 의무가 있으면 안전장치 계획)
  */
 export function sanitizePlan(state: GameState, side: Side, raw: unknown): TurnPlan {
   const n = state.config.actionsPerTurn
   const plan = Array.isArray(raw) ? padPlan(raw as Action[], n) : padPlan([], n)
   try {
     if (validatePlan(state, side, plan).ok) return plan
-    if (!plan.some((a) => a?.type === 'move')) {
+    if (state.config.minMovesPerTurn > 0 && !plan.some((a) => a?.type === 'move')) {
       for (let i = 0; i < n; i++) {
         if (plan[i]!.type !== 'wait') continue
         const units = planUnits(state, side, plan.slice(0, i))
@@ -201,7 +201,7 @@ export function sanitizePlan(state: GameState, side: Side, raw: unknown): TurnPl
   } catch {
     // 형식이 깨진 입력
   }
-  return fallbackPlan(state, side)
+  return state.config.minMovesPerTurn > 0 ? fallbackPlan(state, side) : padPlan([], n)
 }
 
 /**

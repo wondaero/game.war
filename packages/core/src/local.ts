@@ -1,4 +1,4 @@
-import type { RngState, UnitInstance } from '@war/v2'
+import { CURRENCIES, type RngState, type UnitInstance } from '@war/v2'
 import {
   InsufficientFundsError,
   NotFoundError,
@@ -64,11 +64,15 @@ export class LocalStorageInventoryRepository implements InventoryRepository {
 
 export class LocalStorageWalletRepository implements WalletRepository {
   constructor(private readonly data: SaveData) {}
+  /** 예전 저장에 없는 재화는 0 으로 채움 */
+  private full(): Wallet {
+    return { ...(Object.fromEntries(CURRENCIES.map((c) => [c, 0])) as Wallet), ...this.data.wallet }
+  }
   async get() {
-    return clone(this.data.wallet)
+    return clone(this.full())
   }
   async apply(delta: Partial<Wallet>) {
-    const next = { ...this.data.wallet }
+    const next = this.full()
     for (const [k, v] of Object.entries(delta) as [keyof Wallet, number][]) {
       next[k] = (next[k] ?? 0) + v
       if (next[k] < 0) throw new InsufficientFundsError(k, -v, this.data.wallet[k] ?? 0)

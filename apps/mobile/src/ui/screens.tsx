@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ABILITY_KINDS, ABILITIES, STAT_KEYS, type StatKey, type UnitInstance } from '@war/v2'
+import { ABILITY_KINDS, ABILITIES, MAX_REROLL_LOCKS, MERGE_COUNT, MERGE_REWARD, STAT_KEYS, type StatKey, type UnitInstance } from '@war/v2'
 import type { Wallet } from '@war/core'
 import { service, V2_CFG } from '../services.ts'
 import { CardInfo } from './CardInfo.tsx'
 import { costText, CURRENCY_LABEL, IMAGE_INFO, imageOf, STAT_LABEL } from './format.ts'
 import { UnitRow } from './UnitRow.tsx'
+import { loadPracticeSeconds, PRACTICE_SECONDS, savePracticeSeconds, secondsLabel } from '../lobby/store.ts'
 
 const statSum = (u: UnitInstance) => u.stats.atk + u.stats.armor * 3 + u.stats.hp / 2
 
@@ -78,19 +79,65 @@ const SORT_LABEL: Record<SortKey, string> = {
   range: '사거리',
 }
 
-export function InventoryScreen({ version, onOpen }: { version: number; onOpen: (id: string) => void }) {
+export function InventoryScreen({
+  version,
+  onOpen,
+  onChanged,
+}: {
+  version: number
+  onOpen: (id: string) => void
+  onChanged: () => void
+}) {
   const units = useUnits(version)
+  const [deck, setDeck] = useState<string[]>([])
   const [image, setImage] = useState('all')
   const [sort, setSort] = useState<SortKey>('new')
+  const [merging, setMerging] = useState(false)
+  const [picked, setPicked] = useState<string[]>([])
+  const [msg, setMsg] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    void service.getDeck().then(setDeck)
+  }, [version])
   const shown = useMemo(() => {
     const list = (units ?? []).filter((u) => image === 'all' || u.image === image)
     const key = (u: UnitInstance) =>
       sort === 'new' ? (u.createdAt ?? 0) : sort === 'ability' ? (u.ability ? 1000 : 0) + statSum(u) : u.stats[sort]
     return [...list].sort((a, b) => key(b) - key(a))
   }, [units, image, sort])
+
+  const toggle = (u: UnitInstance) =>
+    setPicked((p) => (p.includes(u.id) ? p.filter((x) => x !== u.id) : p.length < MERGE_COUNT ? [...p, u.id] : p))
+  const doMerge = async () => {
+    const withAbility = (units ?? []).filter((u) => picked.includes(u.id) && u.ability)
+    if (withAbility.length && !confirm(`특수능력이 있는 캐릭 ${withAbility.length}명이 포함돼 있습니다. 합칠까요?`)) return
+    setBusy(true)
+    setMsg(null)
+    try {
+      const r = await service.merge(picked)
+      setMsg(`합성 완료: 리롤석 +${r.gained} (보유 ${r.wallet.rerollStone})`)
+      setPicked([])
+      onChanged()
+    } catch (e) {
+      setMsg((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="screen-body">
-      <h2>보관함 ({units?.length ?? 0})</h2>
+      <div className="row between">
+        <h2>보관함 ({units?.length ?? 0})</h2>
+        <button className={merging ? 'on' : ''} onClick={() => (setMerging((m) => !m), setPicked([]), setMsg(null))}>
+          {merging ? '합성 취소' : '합성하기'}
+        </button>
+      </div>
+      {merging && (
+        <p className="hint">
+          캐릭 {MERGE_COUNT}명을 골라 합치면 리롤석 {MERGE_REWARD}개를 받습니다. 합친 캐릭은 사라집니다. 덱에 있는 캐릭은 고를 수 없습니다.
+        </p>
+      )}
       <div className="row">
         <select value={image} onChange={(e) => setImage(e.target.value)}>
           <option value="all">전체 그림</option>
@@ -110,20 +157,46 @@ export function InventoryScreen({ version, onOpen }: { version: number; onOpen: 
       </div>
       {units && units.length === 0 && <p className="hint">보유 유닛이 없습니다. 상점 → 뽑기에서 얻으세요.</p>}
       <div className="list">
-        {shown.map((u) => (
-          <UnitRow key={u.id} unit={u} onClick={() => onOpen(u.id)} />
-        ))}
+        {shown.map((u) => {
+          const inDeck = deck.includes(u.id)
+          if (!merging) return <UnitRow key={u.id} unit={u} onClick={() => onOpen(u.id)} badge={inDeck ? '덱' : undefined} />
+          const on = picked.includes(u.id)
+          return (
+            <UnitRow
+              key={u.id}
+              unit={u}
+              selected={on}
+              disabled={inDeck || (!on && picked.length >= MERGE_COUNT)}
+              onClick={() => toggle(u)}
+              badge={inDeck ? '덱' : on ? `${picked.indexOf(u.id) + 1}` : undefined}
+            />
+          )
+        })}
       </div>
+      {msg && <p className="hint">{msg}</p>}
+      {merging && (
+        <div className="footer sticky">
+          <button className="primary" disabled={busy || picked.length !== MERGE_COUNT} onClick={() => void doMerge()}>
+            합성 ({picked.length}/{MERGE_COUNT}) → 리롤석 {MERGE_REWARD}개
+          </button>
+        </div>
+      )}
     </div>
   )
 }
 
-// ───────────── 유닛 상세 ─────────────
+// ───────────── 유닛 상세 · 리롤 ─────────────
 
-export function UnitDetail({ id, onBack }: { id: string; onBack: () => void }) {
+export function UnitDetail({ id, onBack, onChanged }: { id: string; onBack: () => void; onChanged: () => void }) {
   const [unit, setUnit] = useState<UnitInstance | null | undefined>(undefined)
+  const [lock, setLock] = useState<StatKey | null>(null)
+  const [last, setLast] = useState<{ before: UnitInstance; after: UnitInstance } | null>(null)
+  const [stones, setStones] = useState<number | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
   useEffect(() => {
     void service.getUnit(id).then(setUnit)
+    void service.getWallet().then((w) => setStones(w.rerollStone ?? 0))
   }, [id])
   if (unit === undefined) return null
   if (!unit)
@@ -132,30 +205,58 @@ export function UnitDetail({ id, onBack }: { id: string; onBack: () => void }) {
         유닛을 찾을 수 없습니다. <button onClick={onBack}>뒤로</button>
       </div>
     )
+  const cost = service.rerollCost()
+  const need = cost.rerollStone ?? 0
+  const doReroll = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await service.reroll(unit.id, lock)
+      setLast({ before: r.before, after: r.after })
+      setUnit(r.after)
+      setStones(r.wallet.rerollStone ?? 0)
+      onChanged()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
   return (
     <div className="screen-body">
       <button className="back" onClick={onBack}>
         ← 뒤로
       </button>
       <CardInfo unit={unit} />
-      <table className="stat-table">
-        <tbody>
-          {STAT_KEYS.map((k) => {
-            const r = V2_CFG.statRanges[k]
-            return (
-              <tr key={k}>
-                <td>{STAT_LABEL[k]}</td>
-                <td>
-                  <b>{unit.stats[k]}</b>
-                </td>
-                <td className="hint">
-                  ({r.min}~{r.max})
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
+      <h3>리롤</h3>
+      <p className="hint">
+        그림·특수능력은 그대로입니다. 능력치 {MAX_REROLL_LOCKS}개를 눌러 잠그면 유지되고, 나머지는 범위 안에서 다시 정해집니다.
+      </p>
+      <div className="lock-list">
+        {STAT_KEYS.map((k) => {
+          const r = V2_CFG.statRanges[k]
+          const on = lock === k
+          const d = last ? last.after.stats[k] - last.before.stats[k] : 0
+          return (
+            <button key={k} className={`lock ${on ? 'on' : ''}`} onClick={() => setLock(on ? null : k)}>
+              <span>{on ? '🔒' : '🔓'}</span>
+              <span className="lock-name">{STAT_LABEL[k]}</span>
+              <b>{unit.stats[k]}</b>
+              <span className="hint">
+                ({r.min}~{r.max})
+              </span>
+              {last && <span className={d > 0 ? 'up' : d < 0 ? 'down' : 'hint'}>{d > 0 ? `▲${d}` : d < 0 ? `▼${-d}` : '–'}</span>}
+            </button>
+          )
+        })}
+      </div>
+      <button className="primary" disabled={busy || (stones !== null && stones < need)} onClick={() => void doReroll()}>
+        리롤 · {costText(cost)} (보유 {stones ?? '…'}){lock ? ` · ${STAT_LABEL[lock]} 유지` : ''}
+      </button>
+      {stones !== null && stones < need && (
+        <p className="hint">리롤석이 부족합니다. 보관함 → 합성하기에서 캐릭 {MERGE_COUNT}명을 합쳐 얻으세요.</p>
+      )}
+      <ErrorLine error={error} />
       {unit.createdAt !== undefined && <p className="hint">획득 {new Date(unit.createdAt).toLocaleString()}</p>}
     </div>
   )
@@ -293,6 +394,12 @@ export function RatesScreen() {
       <ul>
         <li>뽑기 1회: {costText(d.costs[1])}</li>
         <li>뽑기 10회: {costText(d.costs[10])}</li>
+        <li>
+          합성: 캐릭 {d.reroll.mergeCount}명 → 리롤석 {d.reroll.mergeReward}개
+        </li>
+        <li>
+          리롤: {costText(d.reroll.cost)} (능력치 {d.reroll.maxLocks}개 잠금 가능)
+        </li>
       </ul>
     </div>
   )
@@ -302,6 +409,7 @@ export function RatesScreen() {
 
 export function DevScreen({ onChanged }: { onChanged: () => void }) {
   const [msg, setMsg] = useState<string | null>(null)
+  const [practice, setPractice] = useState(loadPracticeSeconds)
   const act = async (label: string, fn: () => Promise<unknown>) => {
     try {
       await fn()
@@ -317,10 +425,20 @@ export function DevScreen({ onChanged }: { onChanged: () => void }) {
       <p className="hint">자원 차감: {service.chargesResources ? '켜짐' : '꺼짐 (개발 모드)'}</p>
       <div className="row">
         <button onClick={() => act('보석 +1000', () => service.dev.addResources({ gem: 1000 }))}>보석 +1000</button>
+        <button onClick={() => act('리롤석 +10', () => service.dev.addResources({ rerollStone: 10 }))}>리롤석 +10</button>
         <button onClick={() => confirm('보관함을 비울까요?') && act('보관함 초기화', () => service.dev.resetInventory())}>
           보관함 초기화
         </button>
       </div>
+      <h3>AI 연습 제한시간</h3>
+      <div className="row">
+        {PRACTICE_SECONDS.map((s) => (
+          <button key={s} className={practice === s ? 'on' : ''} onClick={() => (savePracticeSeconds(s), setPractice(s))}>
+            {secondsLabel(s)}
+          </button>
+        ))}
+      </div>
+      <p className="hint">방 목록의 "AI와 연습하기"에 적용됩니다. 무제한은 AI 연습·오프라인 방에서만 쓸 수 있습니다.</p>
       <h3>능력 지정 지급 (시험용)</h3>
       <div className="grid2">
         <button onClick={() => act('능력 없는 유닛 지급', () => service.dev.grantUnit(null))}>능력 없음</button>

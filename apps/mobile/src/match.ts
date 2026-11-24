@@ -37,10 +37,11 @@ export class HumanController implements PlayerController {
     })
   }
 
+  /** deadlineMs <= 0 이면 무제한 */
   chooseTurnPlan(_state: GameState, deadlineMs: number): Promise<TurnPlan> {
     return new Promise((resolve) => {
       this.pending = { kind: 'plan', resolve: resolve as (v: never) => void }
-      this.onRequest('plan', Date.now() + deadlineMs)
+      this.onRequest('plan', deadlineMs > 0 ? Date.now() + deadlineMs : Infinity)
     })
   }
 
@@ -76,11 +77,17 @@ export interface MatchView {
   state: GameState
   request: { kind: 'deploy' } | { kind: 'plan'; deadline: number } | null
   /** 재생할 턴 로그와 그 전후 상태 */
-  playback: { log: TurnLog; before: GameState; after: GameState } | null
+  playback: { log: TurnLog; before: GameState; after: GameState; notice?: string } | null
   error: string | null
 }
 
 const timeout = <T,>(ms: number, value: T) => new Promise<T>((r) => setTimeout(() => r(value), ms))
+
+/** 제출한 계획이 규칙에 맞게 바뀌었으면 안내 문구 (시간 초과 자동 이동 등) */
+export function fixNotice(raw: TurnPlan, fixed: TurnPlan, n: number): string | undefined {
+  if (JSON.stringify(padPlan(raw, n)) === JSON.stringify(fixed)) return undefined
+  return '⚠ 규칙에 맞지 않는 행동이 있어 이번 턴은 전부 대기로 처리했습니다'
+}
 
 /**
  * 로컬 매치 진행 (사람 vs AI). 엔진은 순수 함수이고 진행·시간 제한은 여기서 담당.
@@ -144,16 +151,21 @@ export class LocalMatch {
     const n = state.config.actionsPerTurn
     while (state.phase === 'plan') {
       const s = state
-      // 제한시간 + 여유 1초 안에 못 내면 빈 계획 (UI 는 마감 시 입력 중인 칸을 자동 제출)
-      const ask = (c: PlayerController) => Promise.race([c.chooseTurnPlan(s, this.turnMs), timeout(this.turnMs + 1000, padPlan([], n))])
+      // 제한시간 + 여유 1초 안에 못 내면 빈 계획 (UI 는 마감 시 입력 중인 행동을 자동 제출). turnMs <= 0 = 무제한
+      const ask = (c: PlayerController) =>
+        this.turnMs > 0
+          ? Promise.race([c.chooseTurnPlan(s, this.turnMs), timeout(this.turnMs + 1000, padPlan([], n))])
+          : c.chooseTurnPlan(s, 0)
       const [rawA, rawB] = await Promise.all([ask(ctrl.A), ask(ctrl.B)])
       const plans = { A: sanitizePlan(s, 'A', rawA), B: sanitizePlan(s, 'B', rawB) }
+      const me = this.human.side
+      const notice = fixNotice(me === 'A' ? rawA : rawB, plans[me], n)
 
       const { state: next, log } = resolveTurn(s, plans)
       state = next
       await new Promise<void>((resolve) => {
         this.playbackDone = resolve
-        this.set({ state, playback: { log, before: s, after: next } })
+        this.set({ state, playback: { log, before: s, after: next, notice } })
       })
     }
   }

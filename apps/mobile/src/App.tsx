@@ -64,7 +64,7 @@ function MatchScreen({ match, onExit }: { match: MatchLike; onExit: (result: Gam
       </div>
     )
   if (playback)
-    return <Playback before={playback.before} after={playback.after} log={playback.log} onDone={() => match.finishPlayback()} />
+    return <Playback before={playback.before} after={playback.after} log={playback.log} notice={playback.notice} onDone={() => match.finishPlayback()} />
   if (state.phase === 'over' && state.result) {
     const w = state.result.winner
     return (

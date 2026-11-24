@@ -144,6 +144,43 @@ describe('뽑기 서비스 (새 규칙)', () => {
   })
 })
 
+describe('합성 · 리롤', () => {
+  it('합성: 3명 → 리롤석 1개, 덱에 있는 캐릭·중복·개수 틀림은 거부', async () => {
+    const { svc } = setup()
+    const units = (await svc.pull(10)).units
+    const deck: string[] = []
+    for (const u of units) if (deck.length < 4 && !deck.some((id) => units.find((x) => x.id === id)!.image === u.image)) deck.push(u.id)
+    if (deck.length === 4) await svc.setDeck(deck)
+    const free = units.filter((u) => !deck.includes(u.id)).map((u) => u.id)
+    if (deck.length === 4) await expect(svc.merge([deck[0]!, free[0]!, free[1]!])).rejects.toThrow(/덱에 있는/)
+    await expect(svc.merge([free[0]!, free[0]!, free[1]!])).rejects.toThrow()
+    await expect(svc.merge([free[0]!, free[1]!])).rejects.toThrow()
+    const r = await svc.merge(free.slice(0, 3))
+    expect(r.wallet.rerollStone).toBe(1)
+    expect((await svc.listUnits()).some((u) => free.slice(0, 3).includes(u.id))).toBe(false)
+  })
+
+  it('리롤: 리롤석 1개 차감 (개발 모드에서도), 그림·특수능력·잠근 능력치 유지', async () => {
+    const { svc } = setup()
+    const u = await svc.dev.grantUnit('homing')
+    await expect(svc.reroll(u.id, 'hp')).rejects.toBeInstanceOf(InsufficientFundsError)
+    await svc.dev.addResources({ rerollStone: 20 })
+    let cur = u
+    let changed = false
+    for (let i = 0; i < 20; i++) {
+      const r = await svc.reroll(cur.id, 'hp')
+      expect(r.after.image).toBe(u.image)
+      expect(r.after.ability).toEqual(u.ability)
+      expect(r.after.stats.hp).toBe(u.stats.hp)
+      if (JSON.stringify(r.after.stats) !== JSON.stringify(cur.stats)) changed = true
+      cur = r.after
+    }
+    expect(changed).toBe(true)
+    expect((await svc.getWallet()).rerollStone).toBe(0)
+    expect(await svc.getUnit(u.id)).toEqual(cur)
+  })
+})
+
 describe('스키마 마이그레이션', () => {
   it('예전 저장(v1, 챔피언 규칙) → v2: 유닛·덱은 비우고 보석은 유지', async () => {
     const storage = new MemoryStorage()
@@ -159,7 +196,7 @@ describe('스키마 마이그레이션', () => {
     )
     const store = new LocalSaveStore(storage, { newSeed: () => 1 })
     expect(await store.repos.inventory.list()).toEqual([])
-    expect(await store.repos.wallet.get()).toEqual({ gem: 300 })
+    expect(await store.repos.wallet.get()).toEqual({ gem: 300, rerollStone: 0 })
     expect(JSON.parse(storage.getItem(KEY)!).schemaVersion).toBe(2)
   })
 

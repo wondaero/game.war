@@ -97,11 +97,13 @@ export function Playback({
   before,
   after,
   log,
+  notice,
   onDone,
 }: {
   before: GameState
   after: GameState
   log: TurnLog
+  notice?: string | undefined
   onDone: () => void
 }) {
   const frames = useMemo(() => buildFrames(before, after, log), [before, after, log])
@@ -128,6 +130,7 @@ export function Playback({
           행동 {f.step}/{before.config.actionsPerTurn} · {f.label}
         </span>
       </div>
+      {notice && <div className="danger-notice">{notice}</div>}
       <Board cfg={before.config} units={f.units} turn={log.turn} marks={f.marks} floats={f.floats} />
       <div className="log">
         {f.lines.map((l, k) => (

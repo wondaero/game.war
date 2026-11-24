@@ -1,6 +1,17 @@
-import { deploy, padPlan, resolveTurn, sanitizePlan, validateDeployment, type GameState, type Pos, type Side, type TurnPlan } from '@war/v2'
-import { HumanController, type MatchView } from '../match.ts'
-import { mirror, mirrorState } from './mirror.ts'
+import {
+  deploy,
+  mirror,
+  mirrorState,
+  padPlan,
+  resolveTurn,
+  sanitizePlan,
+  validateDeployment,
+  type GameState,
+  type Pos,
+  type Side,
+  type TurnPlan,
+} from '@war/v2'
+import { fixNotice, HumanController, type MatchView } from '../match.ts'
 import { MatchNet } from './net.ts'
 import { verifyMatchResult } from './remoteService.ts'
 
@@ -93,7 +104,9 @@ export class OnlineMatch {
       const s = state
       const limit = this.turnMs
       const raw = await Promise.race([this.human.chooseTurnPlan(this.show(s), limit), timeout(limit + 1000, padPlan([], n))])
-      const mine: TurnPlan = sanitizePlan(s, this.mySide, this.toCanon(raw, s))
+      const rawCanon = this.toCanon(raw, s)
+      const mine: TurnPlan = sanitizePlan(s, this.mySide, rawCanon)
+      const notice = fixNotice(rawCanon, mine, n)
       this.set({ request: null })
       await this.net.submit(s.turn, mine)
 
@@ -107,7 +120,7 @@ export class OnlineMatch {
         this.playbackDone = resolve
         this.set({
           state: this.show(next),
-          playback: { log: this.toCanon(log, s), before: this.show(s), after: this.show(next) },
+          playback: { log: this.toCanon(log, s), before: this.show(s), after: this.show(next), notice },
         })
       })
     }

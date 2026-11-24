@@ -58,7 +58,8 @@ export const DEFAULT_V2_CONFIG: Readonly<V2Config> = Object.freeze({
   cardsPerSide: 4,
 
   actionsPerTurn: 3,
-  minMovesPerTurn: 1,
+  // 이동 의무 없음 (2026-11-24): 아무것도 안 하면 대기 3번. 시뮬레이션 비교용으로 설정은 남겨 둠
+  minMovesPerTurn: 0,
   // 규칙 ② (시뮬레이션 비교로 결정): 행동은 같은 캐릭이 여러 번 가능, 액션(공격·마법·회복)은 턴당 2번·캐릭당 1번
   actionsPerUnitByAlive: [0, 3, 3, 3, 3],
   maxActsPerTurn: 2,
@@ -71,7 +72,8 @@ export const DEFAULT_V2_CONFIG: Readonly<V2Config> = Object.freeze({
   suddenDeathTurn: 10,
   suddenDeathHealBp: 5000,
 
-  dangerZoneStartTurn: 5,
+  // 오리지날 맵: 위험지대 없음 (0 = 끔). 이벤트 맵에서 켤 수 있게 나머지 설정은 남겨 둠 (예: 5턴부터)
+  dangerZoneStartTurn: 0,
   dangerZoneGrowEveryTurns: 3,
   dangerZoneMaxDepth: 2,
   dangerZoneDamageBp: 2500,
