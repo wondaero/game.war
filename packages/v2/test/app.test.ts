@@ -190,3 +190,57 @@ describe('행동 규칙 ②: 같은 캐릭 여러 행동 · 액션(공격·능�
     expect(validatePlan(s, 'A', [heal, at('A1', 2), mv('A1', 2, 4)]).ok).toBe(true) // A0 회복 + A1 공격 = 2번
   })
 })
+
+describe('이동 시 자가 회복', () => {
+  it('이동 행동 2번이어도 회복은 턴당 1번', () => {
+    const s = board([
+      { id: 'A0', side: 'A', pos: { x: 0, y: 5 } },
+      { id: 'A1', side: 'A', pos: { x: 3, y: 5 } },
+      { id: 'B0', side: 'B', pos: { x: 0, y: 0 } },
+    ])
+    s.units.A0!.inst = { ...s.units.A0!.inst, ability: { kind: 'moveRegen', tier: 0 } } // 공격력 20의 10% = 2
+    s.units.A0!.hp = 30
+    const plan: Action[] = [
+      { type: 'move', unit: 'A0', to: { x: 0, y: 4 } },
+      { type: 'move', unit: 'A0', to: { x: 0, y: 3 } },
+      W,
+    ]
+    const r = resolveTurn(s, { A: plan, B: [W, W, W] })
+    const heals = r.log.steps.flat().filter((e) => e.type === 'heal' && e.unit === 'A0')
+    expect(heals).toHaveLength(1)
+    expect(r.state.units.A0!.hp).toBe(32)
+  })
+})
+
+describe('1대1 판정', () => {
+  // 4명으로 시작한 판에서 각자 1명만 남은 상황
+  function duelState(a: { hp: number; maxHp?: number; ability?: boolean }, b: { hp: number; maxHp?: number; ability?: boolean }) {
+    const s = board([
+      { id: 'A0', side: 'A', pos: { x: 0, y: 5 } },
+      { id: 'B0', side: 'B', pos: { x: 5, y: 0 } },
+    ])
+    s.config = { ...s.config, cardsPerSide: 4 }
+    for (const [id, o] of [['A0', a], ['B0', b]] as const) {
+      const u = s.units[id]!
+      u.inst = { ...u.inst, stats: { ...u.inst.stats, hp: o.maxHp ?? 50 }, ability: o.ability ? { kind: 'reflect', tier: 0 } : null }
+      u.hp = o.hp
+    }
+    return s
+  }
+  const end = (s: GameState) => resolveTurn(s, { A: [W, W, W], B: [W, W, W] }).state
+
+  it('남은 체력 많은 쪽 승', () => {
+    expect(end(duelState({ hp: 20 }, { hp: 10 })).result).toEqual({ winner: 'A', reason: 'oneOnOne' })
+  })
+  it('체력 같으면 능력치 점수(원래 최대 체력 포함) 낮은 쪽 승', () => {
+    expect(end(duelState({ hp: 10, maxHp: 50 }, { hp: 10, maxHp: 30 })).result).toEqual({ winner: 'B', reason: 'oneOnOne' })
+  })
+  it('특수능력은 +20점', () => {
+    expect(end(duelState({ hp: 10, ability: true }, { hp: 10 })).result).toEqual({ winner: 'B', reason: 'oneOnOne' })
+  })
+  it('체력·점수 다 같으면 판정 없이 계속', () => {
+    const s = end(duelState({ hp: 10 }, { hp: 10 }))
+    expect(s.result).toBeNull()
+    expect(s.phase).toBe('plan')
+  })
+})

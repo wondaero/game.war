@@ -1,7 +1,7 @@
 import { ABILITIES, abilityValue } from './abilities.ts'
 import { aliveOf, effAtk, inZone, isDangerCell, maxHp, square3, unitAt } from './board.ts'
 import { attackTargets, hitDamage, skillHealAmount } from './combat.ts'
-import { applyBp } from './config.ts'
+import { applyBp, type V2Config } from './config.ts'
 import type { Action, GameEvent, GameResult, GameState, Side, TurnLog, TurnPlan, UnitId, UnitState } from './types.ts'
 import { SIDES } from './types.ts'
 import { actionError, cloneUnits, EngineError, validatePlan } from './validate.ts'
@@ -75,6 +75,7 @@ export function resolveTurn(
       ev.push({ type: 'move', unit: u.id, from: { ...u.pos }, to: { ...a.to } })
       u.pos = { ...a.to }
       const regen = abilityValue(u.inst, 'moveRegen')
+      // 턴당 1번 (2026-11-24 확정: 이동을 여러 번 해도 1번)
       if (regen && u.moveRegenTurn !== turn) {
         u.moveRegenTurn = turn
         heal(ctx, u, Math.max(1, applyBp(effAtk(u, turn), regen)), 'moveRegen', true, ev)
@@ -165,7 +166,7 @@ export function resolveTurn(
 
     // ⑤ 사망
     killDead(units, ev)
-    result = annihilation(units)
+    result = annihilation(units) ?? oneOnOne(state, units)
     if (result) ev.push({ type: 'gameOver', result })
     steps.push(ev)
     if (result) break
@@ -189,7 +190,7 @@ export function resolveTurn(
       endEvents.push({ type: 'zoneDamage', unit: u.id, damage: n })
     }
     killDead(units, endEvents)
-    result = annihilation(units)
+    result = annihilation(units) ?? oneOnOne(state, units)
     if (!result && turn >= cfg.maxTurns) result = judgeByHp(units, cfg.judgeBy)
     if (result) endEvents.push({ type: 'gameOver', result })
   }
@@ -217,7 +218,7 @@ function heal(ctx: Ctx, u: UnitState, raw: number, source: HealSource, passive: 
   if (!u.alive || u.hp <= 0 || raw <= 0) return
   let amount = raw
   if (ctx.turn >= cfg.suddenDeathTurn) amount = Math.max(1, applyBp(amount, cfg.suddenDeathHealBp))
-  if (passive) {
+  if (passive && cfg.passiveHealCapBp > 0) {
     if (u.passiveHealTurn !== ctx.turn) {
       u.passiveHealTurn = ctx.turn
       u.passiveHealed = 0
@@ -238,6 +239,31 @@ function killDead(units: Record<UnitId, UnitState>, ev: GameEvent[]) {
       u.alive = false
       ev.push({ type: 'death', unit: u.id })
     }
+}
+
+/** 능력치 점수: 원래 능력치 합 (버프·약화 무시) + 특수능력이 있으면 abilityScore */
+export function unitScore(cfg: V2Config, u: UnitState): number {
+  const s = u.inst.stats
+  return s.atk + s.armor + s.hp + s.move + s.range + (u.inst.ability ? cfg.abilityScore : 0)
+}
+
+/**
+ * 1대1 판정 (처음부터 1대1인 판은 제외: cardsPerSide > 1 일 때만).
+ * 남은 체력 많은 쪽 → 같으면 능력치 점수 낮은 쪽 → 그것도 같으면 판정하지 않고 계속 (null)
+ */
+function oneOnOne(state: GameState, units: Record<UnitId, UnitState>): GameResult | null {
+  const cfg = state.config
+  if (!cfg.endOnOneVsOne || cfg.cardsPerSide <= 1) return null
+  const a = aliveOf(units, 'A')
+  const b = aliveOf(units, 'B')
+  if (a.length !== 1 || b.length !== 1) return null
+  const ua = a[0]!
+  const ub = b[0]!
+  if (ua.hp !== ub.hp) return { winner: ua.hp > ub.hp ? 'A' : 'B', reason: 'oneOnOne' }
+  const sa = unitScore(cfg, ua)
+  const sb = unitScore(cfg, ub)
+  if (sa !== sb) return { winner: sa < sb ? 'A' : 'B', reason: 'oneOnOne' }
+  return null
 }
 
 function annihilation(units: Record<UnitId, UnitState>): GameResult | null {

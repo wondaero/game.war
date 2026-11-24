@@ -73,7 +73,9 @@ function MatchScreen({ match, onExit }: { match: MatchLike; onExit: (result: Gam
         <p className="hint">
           {state.result.reason === 'maxTurns'
             ? `최대 ${state.config.maxTurns}턴 도달 — 남은 체력 비율 판정`
-            : w === 'draw'
+            : state.result.reason === 'oneOnOne'
+              ? '1대1 — 남은 체력 판정 (같으면 능력치 점수 낮은 쪽 승)'
+              : w === 'draw'
               ? '양쪽 동시 전멸'
               : w === 'A'
                 ? '상대 전멸'

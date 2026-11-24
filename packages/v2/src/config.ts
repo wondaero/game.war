@@ -25,10 +25,14 @@ export interface V2Config {
   actsPerUnitByAlive: readonly number[]
 
   maxTurns: number
+  /** 양쪽 1명씩 남으면 바로 판정 (남은 체력 → 능력치 점수 낮은 쪽 → 같으면 계속) */
+  endOnOneVsOne: boolean
+  /** 능력치 점수에 더하는 특수능력 점수 */
+  abilityScore: number
   /** 최대 턴 판정: 남은 체력 비율(남은/최대) 또는 남은 체력 합 */
   judgeBy: 'hpRatio' | 'hpTotal'
 
-  /** 행동 없이 회복(자가 회복·흡혈)의 턴당 상한 (최대 체력 대비) */
+  /** 행동 없이 회복(자가 회복·흡혈)의 턴당 상한 (최대 체력 대비, 0 = 없음) */
   passiveHealCapBp: number
   /** 이 턴부터 모든 회복에 배율 */
   suddenDeathTurn: number
@@ -66,9 +70,12 @@ export const DEFAULT_V2_CONFIG: Readonly<V2Config> = Object.freeze({
   actsPerUnitByAlive: [0, 1, 1, 1, 1],
 
   maxTurns: 20,
+  endOnOneVsOne: true,
+  abilityScore: 20,
   judgeBy: 'hpRatio',
 
-  passiveHealCapBp: 1000,
+  // 0 = 상한 없음 (2026-11-24: 이동 회복·흡혈이 둘 다 턴당 1번이라 불필요해져 없앰)
+  passiveHealCapBp: 0,
   suddenDeathTurn: 10,
   suddenDeathHealBp: 5000,
 

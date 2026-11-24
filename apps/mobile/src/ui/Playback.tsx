@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { cloneUnits, type GameEvent, type GameState, type TurnLog, type UnitId, type UnitState } from '@war/v2'
-import { addDangerMarks, addMark, Board, type CellMark, type FloatLabel } from './Board.tsx'
+import { cloneUnits, SIDES, type Aim, type GameEvent, type GameState, type TurnLog, type UnitId, type UnitState } from '@war/v2'
+import { addDangerMarks, addMark, Board, FLIGHT_MS, type CellMark, type FloatLabel, type Projectile } from './Board.tsx'
 import { eventLines } from './format.ts'
 
 interface Frame {
@@ -10,6 +10,9 @@ interface Frame {
   marks: Map<string, CellMark[]>
   floats: Map<UnitId, FloatLabel[]>
   lines: string[]
+  projectiles?: Projectile[]
+  /** 이 프레임 표시 시간 (기본 FRAME_MS) */
+  ms?: number
 }
 
 const FRAME_MS = 750
@@ -58,7 +61,33 @@ function buildFrames(before: GameState, after: GameState, log: TurnLog): Frame[]
       if (e.type === 'buff') for (const t of e.targets) float(t, { text: '⬆', kind: 'status' })
       if (e.type === 'status') float(e.unit, { text: e.status === 'nullified' ? '⛔' : e.status === 'slowed' ? '🐌' : '☠', kind: 'status' })
     }
-    frames.push({ step, label: '액션', units: moved, marks, floats, lines })
+    // 투사체: 실제로 실행된 공격(공격 이벤트)과 회복 능력(취소되지 않은 계획)만
+    const projectiles: Projectile[] = []
+    const posOf = (aim: Aim) => (aim.kind === 'cell' ? aim.pos : moved[aim.id]?.pos)
+    for (const e of events) {
+      if (e.type !== 'attack') continue
+      const att = moved[e.unit]
+      const to = posOf(e.aim)
+      if (att && to) projectiles.push({ from: att.pos, to, kind: 'attack', side: att.owner })
+    }
+    for (const side of SIDES) {
+      const a = log.plans[side][i]
+      if (a?.type !== 'skill' || !a.aim) continue
+      if (events.some((e) => e.type === 'fizzle' && e.side === side)) continue
+      const caster = moved[a.unit]
+      const to = posOf(a.aim)
+      if (caster && to) projectiles.push({ from: caster.pos, to, kind: 'heal', side })
+    }
+    frames.push({
+      step,
+      label: '액션',
+      units: moved,
+      marks,
+      floats,
+      lines,
+      projectiles,
+      ms: projectiles.length ? FLIGHT_MS + 700 : FRAME_MS,
+    })
 
     const result = cloneUnits(moved)
     applyHp(
@@ -112,9 +141,9 @@ export function Playback({
 
   useEffect(() => {
     if (last) return
-    const t = setTimeout(() => setI((x) => x + 1), FRAME_MS)
+    const t = setTimeout(() => setI((x) => x + 1), frames[i]?.ms ?? FRAME_MS)
     return () => clearTimeout(t)
-  }, [i, last])
+  }, [i, last, frames])
 
   const f = frames[Math.min(i, frames.length - 1)]
   if (!f) {
@@ -131,7 +160,7 @@ export function Playback({
         </span>
       </div>
       {notice && <div className="danger-notice">{notice}</div>}
-      <Board cfg={before.config} units={f.units} turn={log.turn} marks={f.marks} floats={f.floats} />
+      <Board fxKey={i} cfg={before.config} units={f.units} turn={log.turn} marks={f.marks} floats={f.floats} projectiles={f.projectiles} />
       <div className="log">
         {f.lines.map((l, k) => (
           <div key={k}>{l}</div>

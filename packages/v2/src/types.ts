@@ -88,7 +88,7 @@ export interface UnitState {
   slowTurn: number
   /** 이 턴부터 능력(버프) 다시 사용 가능 */
   readyTurn: number
-  /** 이동 시 자가 회복을 이미 쓴 턴 */
+  /** 이동 시 자가 회복을 이미 쓴 턴 (턴당 1번) */
   moveRegenTurn: number
   /** 행동 없이 회복된 양 (턴당 상한용) */
   passiveHealTurn: number
@@ -113,7 +113,8 @@ export type TurnPlan = readonly Action[]
 // ───────────── 상태 ─────────────
 
 export type Phase = 'deploy' | 'plan' | 'over'
-export type GameResult = { winner: Side | 'draw'; reason: 'annihilation' | 'maxTurns' }
+/** annihilation = 전멸, oneOnOne = 1대1 판정, maxTurns = 최대 턴 판정 */
+export type GameResult = { winner: Side | 'draw'; reason: 'annihilation' | 'oneOnOne' | 'maxTurns' }
 
 export interface GameState {
   config: V2Config

@@ -131,13 +131,14 @@ export function countFires(kind: AbilityKind, holder: string, ev: GameEvent[]): 
 export function ruleVariantReport(name: string, config: Partial<V2Config>) {
   const cfg = makeV2Config(config)
   const N = 100
-  let a = 0, b = 0, d = 0, turns = 0, maxT = 0
+  let a = 0, b = 0, d = 0, turns = 0, maxT = 0, ovo = 0
   for (let i = 0; i < N; i++) {
     const p = play(randomDeck(cfg, `ra${i}`), randomDeck(cfg, `rb${i}`), i, mixed, mixed, config)
     const r = p.s.result!
     r.winner === 'A' ? a++ : r.winner === 'B' ? b++ : d++
     turns += p.s.turn - 1
     if (r.reason === "maxTurns") maxT++
+    if (r.reason === "oneOnOne") ovo++
   }
   const best: Stats = { atk: 20, armor: 5, hp: 50, move: 2, range: 10 }
   const worst: Stats = { atk: 15, armor: 1, hp: 30, move: 1, range: 5 }
@@ -149,5 +150,5 @@ export function ruleVariantReport(name: string, config: Partial<V2Config>) {
   const decks = Array.from({ length: 2000 }, (_, i) => randomDeck(cfg, `pool${i}`).map((u) => ({ ...u, ability: null }))).sort((x, y) => score(y) - score(x))
   const top = decks.slice(0, 200), mid = decks.slice(900, 1100)
   const topMid = duel((i) => top[i]!, (i) => mid[i]!, M, { config }).rate
-  console.log(`[규칙] ${name.padEnd(18)} 평균 ${(turns / N).toFixed(1)}턴 · 전멸 ${pct(1 - maxT / N)} · 판정 ${pct(maxT / N)} · 무 ${pct(d / N)} · A/B ${pct(a / N)}/${pct(b / N)} | 최고vs평균 ${pct(bestAvg)} · 평균vs최악 ${pct(avgWorst)} · 뽑기 상위10%vs중간 ${pct(topMid)}`)
+  console.log(`[규칙] ${name.padEnd(18)} 평균 ${(turns / N).toFixed(1)}턴 · 전멸 ${pct(1 - maxT / N - ovo / N)} · 1대1 ${pct(ovo / N)} · 판정 ${pct(maxT / N)} · 무 ${pct(d / N)} · A/B ${pct(a / N)}/${pct(b / N)} | 최고vs평균 ${pct(bestAvg)} · 평균vs최악 ${pct(avgWorst)} · 뽑기 상위10%vs중간 ${pct(topMid)}`)
 }
